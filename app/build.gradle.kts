@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    
+    alias(libs.plugins.ksp) 
 }
 
 android {
@@ -36,6 +38,10 @@ android {
 
 dependencies {
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")  
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)          // 提供协程扩展，如 Flow、suspend
+    ksp(libs.room.compiler)   
     
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
