@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.QuarkConstants
 import com.yunx.app.data.network.model.DownloadLink
 import com.yunx.app.data.network.model.ShareFile
@@ -26,7 +27,8 @@ sealed interface ResolveUiState {
  */
 class ResolveViewModel(
     private val accountRepository: QuarkAccountRepository,
-    private val resolveRepository: QuarkResolveRepository
+    private val resolveRepository: QuarkResolveRepository,
+    private val downloadManager: DownloadManager
 ) : ViewModel() {
 
     var uiState by mutableStateOf<ResolveUiState>(ResolveUiState.Idle)
@@ -37,6 +39,14 @@ class ResolveViewModel(
 
     var downloadError by mutableStateOf<String?>(null)
         private set
+
+    /** 下载已入队事件：触发后由 UI 切换到下载页 */
+    var downloadStarted by mutableStateOf(false)
+        private set
+
+    fun consumeDownloadStarted() {
+        downloadStarted = false
+    }
 
     fun consumeDownloadError() {
         downloadError = null
@@ -148,6 +158,26 @@ class ResolveViewModel(
         downloadLink = null
     }
 
+    /** 将直链加入下载队列（分片多线程下载，携带 Cookie 与 QuarkPC UA） */
+    fun startDownload(link: DownloadLink) {
+        viewModelScope.launch {
+            val cookie = accountRepository.getAccount()?.cookie
+            if (cookie.isNullOrBlank()) {
+                downloadError = "请先登录夸克网盘"
+                return@launch
+            }
+            downloadManager.enqueue(
+                url = link.downloadUrl,
+                fileName = link.filename,
+                headers = mapOf(
+                    "Cookie" to cookie,
+                    "User-Agent" to QuarkConstants.API_USER_AGENT
+                )
+            )
+            downloadStarted = true
+        }
+    }
+
     private suspend fun loadFiles(s: ShareSession, dirFid: String, cookie: String) {
         resolveRepository.listFiles(s, dirFid, cookie)
             .onSuccess { files ->
@@ -160,12 +190,13 @@ class ResolveViewModel(
 
     class Factory(
         private val accountRepository: QuarkAccountRepository,
-        private val resolveRepository: QuarkResolveRepository
+        private val resolveRepository: QuarkResolveRepository,
+        private val downloadManager: DownloadManager
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             require(modelClass.isAssignableFrom(ResolveViewModel::class.java))
-            return ResolveViewModel(accountRepository, resolveRepository) as T
+            return ResolveViewModel(accountRepository, resolveRepository, downloadManager) as T
         }
     }
 }

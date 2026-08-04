@@ -6,13 +6,15 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuarkAccountEntity::class],
-    version = 1,
+    entities = [QuarkAccountEntity::class, DownloadTaskEntity::class],
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun quarkAccountDao(): QuarkAccountDao
+
+    abstract fun downloadTaskDao(): DownloadTaskDao
 
     companion object {
         @Volatile
@@ -24,7 +26,11 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "yunx.db"
-                ).build().also { instance = it }
+                )
+                    // 开发期：结构变更直接重建，避免迁移崩溃
+                    .fallbackToDestructiveMigration()
+                    .build()
+                    .also { instance = it }
             }
     }
 }

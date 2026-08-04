@@ -89,6 +89,7 @@ fun ResolveScreen(
     downloadLink?.let { link ->
         DownloadLinkDialog(
             link = link,
+            onDownload = { viewModel.startDownload(link) },
             onDismiss = { viewModel.dismissDownloadDialog() }
         )
     }

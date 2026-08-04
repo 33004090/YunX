@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +27,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yunx.app.data.db.AppDatabase
+import com.yunx.app.data.download.ChunkDownloader
+import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.QuarkApi
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
@@ -35,8 +38,10 @@ import com.yunx.app.ui.screens.DownloadScreen
 import com.yunx.app.ui.screens.DriveScreen
 import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
+import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
+import okhttp3.OkHttpClient
 
 /**
  * 主页框架：
@@ -54,16 +59,32 @@ fun MainScreen() {
 
     val context = LocalContext.current
     val api = remember { QuarkApi() }
+    val db = remember { AppDatabase.get(context) }
     val repository = remember {
-        QuarkAccountRepository(AppDatabase.get(context).quarkAccountDao(), api)
+        QuarkAccountRepository(db.quarkAccountDao(), api)
+    }
+    // 下载管理器：OkHttp 分片下载器 + Room 任务持久化
+    val downloadManager = remember {
+        DownloadManager(context, db.downloadTaskDao(), ChunkDownloader(OkHttpClient()))
     }
     val viewModel: QuarkAccountViewModel = viewModel(
         factory = QuarkAccountViewModel.Factory(repository)
     )
     val resolveViewModel: ResolveViewModel = viewModel(
-        factory = ResolveViewModel.Factory(repository, QuarkResolveRepository(api))
+        factory = ResolveViewModel.Factory(repository, QuarkResolveRepository(api), downloadManager)
+    )
+    val downloadViewModel: DownloadViewModel = viewModel(
+        factory = DownloadViewModel.Factory(downloadManager)
     )
     val quarkAccount by viewModel.quarkAccount.collectAsState()
+
+    // 解析页发起下载后，自动切换到「下载」Tab
+    LaunchedEffect(resolveViewModel.downloadStarted) {
+        if (resolveViewModel.downloadStarted) {
+            currentTab = MainTab.Download
+            resolveViewModel.consumeDownloadStarted()
+        }
+    }
 
     // 夸克登录页：全屏覆盖（不含底部导航与折叠标题）
     if (showQuarkLogin) {
@@ -130,7 +151,7 @@ fun MainScreen() {
                         onQuarkLogin = { showQuarkLogin = true },
                         onQuarkLogout = { viewModel.logout() }
                     )
-                    MainTab.Download -> DownloadScreen(scrollBehavior)
+                    MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
                     MainTab.Settings -> SettingsScreen(scrollBehavior)
                 }
             }

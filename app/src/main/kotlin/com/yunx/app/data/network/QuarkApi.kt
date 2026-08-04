@@ -288,7 +288,7 @@ class QuarkApi(
         val item = array.optJSONObject(0) ?: throw QuarkApiException("未返回下载链接")
         DownloadLink(
             fid = item.optString("fid"),
-            filename = item.optString("filename"),
+            filename = item.optString("file_name").ifEmpty { item.optString("filename") },
             downloadUrl = item.optString("download_url"),
             size = item.optLong("size")
         )
