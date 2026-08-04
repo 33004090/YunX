@@ -18,4 +18,15 @@ interface ShareResolveRepository {
         cookie: String
     ): Result<String>
     suspend fun getDownloadLink(fid: String, cookie: String): Result<DownloadLink>
+
+    /**
+     * 获取分享文件下载直链（平台差异在此收敛）：
+     * - 夸克：转存到临时目录 → 用转存后新 fid 取直链；
+     * - UC：直接用分享 fid + stoken + fid_token 取直链（无需转存）。
+     */
+    suspend fun getShareDownloadLink(
+        session: ShareSession,
+        file: ShareFile,
+        cookie: String
+    ): Result<DownloadLink>
 }

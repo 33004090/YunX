@@ -50,10 +50,11 @@ class UCApi(
     // ---------- 分享解析 ----------
 
     suspend fun getShareToken(shareId: String, pwd: String?, cookie: String): ShareToken? = withContext(Dispatchers.IO) {
+        // 官方抓包：body 为 pwd_id/passcode/share_for_transfer（用于转存/下载场景）
         val body = JSONObject()
             .put("pwd_id", shareId)
             .put("passcode", pwd ?: "")
-            .put("support_visit_limit_private_share", true)
+            .put("share_for_transfer", true)
             .toString()
         val request = postJson(UCConstants.SHARE_TOKEN_URL, cookie, body)
         parseData(request) { data ->
@@ -70,6 +71,64 @@ class UCApi(
      * 官方抓包：body 携带 pwd_id/passcode/page/size/fetch_banner 等，不携带 stoken；
      * 进入子目录时 body 追加 pdir_fid。
      */
+    /**
+     * 获取转存分享文件列表（transfer_share/detail，官方下载流程）。
+     * GET + query 携带 stoken → 返回的 share_fid_token 与 stoken 绑定，download 才能通过校验。
+     */
+    suspend fun getTransferShareFiles(
+        shareId: String,
+        stoken: String,
+        pdirFid: String,
+        cookie: String,
+        page: Int = 1,
+        size: Int = 50
+    ): List<ShareFile>? = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append(UCConstants.TRANSFER_SHARE_DETAIL_URL)
+            append("&pwd_id=").append(shareId)
+            append("&pdir_fid=").append(pdirFid)
+            append("&fetch_file_list=1")
+            append("&passcode=")
+            append("&_page=").append(page)
+            append("&_size=").append(size)
+            append("&_fetch_total=1")
+            append("&_fetch_task=1")
+            append("&_fetch_share=1")
+            append("&_sort=")
+            append("&stoken=").append(URLEncoder.encode(stoken, "UTF-8"))
+        }
+        val request = Request.Builder()
+            .url(url)
+            .header("Cookie", cookie)
+            .header("User-Agent", UCConstants.USER_AGENT)
+            .header("Origin", "https://fast.uc.cn")
+            .header("Referer", "https://fast.uc.cn/")
+            .get()
+            .build()
+        parseData(request) { data ->
+            // 兼容 data.list 或 data.detail_info.list 两种结构
+            val array = data.optJSONArray("list")
+                ?: data.optJSONObject("detail_info")?.optJSONArray("list")
+                ?: JSONArray()
+            buildList {
+                for (i in 0 until array.length()) {
+                    val item = array.optJSONObject(i) ?: continue
+                    add(
+                        ShareFile(
+                            fid = item.optString("fid"),
+                            fname = item.optString("file_name"),
+                            fsize = item.optLong("size"),
+                            isdir = item.optBoolean("dir", false),
+                            pdirFid = item.optString("pdir_fid"),
+                            fidToken = item.optString("share_fid_token"),
+                            modifyTime = item.optString("updated_at")
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     suspend fun getShareFiles(
         shareId: String,
         pwd: String?,
@@ -217,6 +276,45 @@ class UCApi(
     }
 
     // ---------- 下载直链 ----------
+
+    /**
+     * UC 官方下载流程（抓包）：不需要先转存！
+     * POST file/download?entry=ft&fr=pc&pr=UCBrowser
+     * body: {"fids":[分享fid],"pwd_id":短码,"stoken":token接口返回,"fids_token":[分享fid_token]}
+     */
+    suspend fun getShareDownloadLink(
+        fid: String,
+        fidToken: String,
+        stoken: String,
+        pwdId: String,
+        cookie: String
+    ): DownloadLink? = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("fids", JSONArray().put(fid))
+            .put("pwd_id", pwdId)
+            .put("stoken", stoken)
+            .put("fids_token", JSONArray().put(fidToken))
+            .toString()
+        val request = postJson(UCConstants.DOWNLOAD_URL, cookie, body)
+        val response = client.newCall(request).execute()
+        val bodyStr = response.use {
+            it.body?.string() ?: throw QuarkApiException("获取下载链接失败：响应为空")
+        }
+        val json = runCatching { JSONObject(bodyStr) }.getOrElse {
+            throw QuarkApiException("响应解析失败")
+        }
+        if (json.optInt("status") != 200) {
+            throw QuarkApiException(json.optString("message").ifBlank { "获取下载链接失败" })
+        }
+        val item = json.optJSONArray("data")?.optJSONObject(0)
+            ?: throw QuarkApiException("未返回下载链接")
+        DownloadLink(
+            fid = item.optString("fid"),
+            filename = item.optString("file_name").ifEmpty { item.optString("filename") },
+            downloadUrl = item.optString("download_url"),
+            size = item.optLong("size")
+        )
+    }
 
     suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withContext(Dispatchers.IO) {
         val body = JSONObject().put("fids", JSONArray().put(fid)).toString()

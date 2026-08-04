@@ -182,20 +182,10 @@ class ResolveViewModel(
                 return@launch
             }
             val repo: ShareResolveRepository = if (isUC) ucResolveRepository else resolveRepository
-            // 1. 确保临时目录存在
-            repo.ensureTempDir(cookie)
-                .onFailure { downloadError = it.message ?: "转存失败" }
-                .onSuccess { dirFid ->
-                    // 2. 转存文件到临时目录（返回转存后的新 fid）
-                    repo.transferFile(s, file, dirFid, cookie)
-                        .onFailure { downloadError = it.message ?: "转存失败" }
-                        .onSuccess { savedFid ->
-                            // 3. 用转存后的新 fid 获取下载直链
-                            repo.getDownloadLink(savedFid, cookie)
-                                .onSuccess { downloadLink = it }
-                                .onFailure { downloadError = it.message ?: "获取下载链接失败" }
-                        }
-                }
+            // 获取分享文件下载直链（夸克：转存后取；UC：直接取，无需转存）
+            repo.getShareDownloadLink(s, file, cookie)
+                .onSuccess { downloadLink = it }
+                .onFailure { downloadError = it.message ?: "获取下载链接失败" }
         }
     }
 

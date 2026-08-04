@@ -28,7 +28,8 @@ class UCResolveRepository(private val api: UCApi) : ShareResolveRepository {
 
     override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
         runCatching {
-            api.getShareFiles(session.shareId, pwd = null, pdirFid = dirFid, cookie = cookie)
+            // 必须用 transfer_share/detail（带 stoken），返回的 share_fid_token 与 stoken 绑定
+            api.getTransferShareFiles(session.shareId, session.stoken, dirFid, cookie)
                 ?: throw IllegalStateException("未获取到文件列表")
         }.fold(
             onSuccess = { Result.success(it) },
@@ -71,6 +72,27 @@ class UCResolveRepository(private val api: UCApi) : ShareResolveRepository {
     override suspend fun getDownloadLink(fid: String, cookie: String): Result<DownloadLink> = runCatching {
         api.getDownloadLink(fid, cookie)
             ?: throw IllegalStateException("获取下载链接失败")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
+
+    /**
+     * UC 官方下载流程：无需转存！
+     * 直接用分享 fid + fid_token + stoken + pwd_id 调 download 接口取直链。
+     */
+    override suspend fun getShareDownloadLink(
+        session: ShareSession,
+        file: ShareFile,
+        cookie: String
+    ): Result<DownloadLink> = runCatching {
+        api.getShareDownloadLink(
+            fid = file.fid,
+            fidToken = file.fidToken,
+            stoken = session.stoken,
+            pwdId = session.shareId,
+            cookie = cookie
+        ) ?: throw IllegalStateException("获取下载链接失败")
     }.fold(
         onSuccess = { Result.success(it) },
         onFailure = { Result.failure(it) }

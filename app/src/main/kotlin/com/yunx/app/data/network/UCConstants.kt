@@ -29,8 +29,14 @@ object UCConstants {
     /** 获取分享文件列表（UC 用 v2/detail） */
     const val SHARE_DETAIL_URL = "$API_BASE/1/clouddrive/share/sharepage/v2/detail?pr=UCBrowser&fr=pc"
 
-    /** 获取下载直链 */
-    const val DOWNLOAD_URL = "$API_BASE/1/clouddrive/file/download?pr=UCBrowser&fr=pc"
+    /**
+     * 转存分享详情（官方下载流程实际使用的文件列表接口，GET + query 带 stoken）。
+     * 该接口返回的 share_fid_token 与 stoken 绑定，download 才能通过 token 校验。
+     */
+    const val TRANSFER_SHARE_DETAIL_URL = "$API_BASE/1/clouddrive/transfer_share/detail?entry=ft&fr=pc&pr=UCBrowser"
+
+    /** 获取下载直链（官方抓包：entry=ft） */
+    const val DOWNLOAD_URL = "$API_BASE/1/clouddrive/file/download?entry=ft&fr=pc&pr=UCBrowser"
 
     /** 根目录 fid */
     const val DEFAULT_PDIR_FID = "0"
