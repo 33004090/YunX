@@ -35,8 +35,10 @@ import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -82,6 +84,7 @@ fun DownloadScreen(
     val tasks by viewModel.tasks.collectAsState()
     val stats by viewModel.stats.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<DownloadTaskEntity?>(null) }
 
     // Android 9- 写公共目录需要 WRITE_EXTERNAL_STORAGE
     val needLegacyPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
@@ -115,7 +118,7 @@ fun DownloadScreen(
                         stats = stats[task.id],
                         onPause = { viewModel.pause(task.id) },
                         onResume = { viewModel.resume(task.id) },
-                        onRemove = { viewModel.remove(task.id) }
+                        onRemove = { pendingDelete = task }
                     )
                 }
             }
@@ -147,6 +150,77 @@ fun DownloadScreen(
             }
         )
     }
+
+    // 删除二次确认（可选同时删除本地文件）
+    pendingDelete?.let { task ->
+        DeleteConfirmDialog(
+            task = task,
+            onDismiss = { pendingDelete = null },
+            onConfirm = { deleteLocal ->
+                pendingDelete = null
+                viewModel.remove(task.id, deleteLocal)
+            }
+        )
+    }
+}
+
+@Composable
+private fun DeleteConfirmDialog(
+    task: DownloadTaskEntity,
+    onDismiss: () -> Unit,
+    onConfirm: (deleteLocal: Boolean) -> Unit
+) {
+    var deleteLocal by remember { mutableStateOf(false) }
+    val hasLocalFile = task.status == DownloadTaskEntity.STATUS_COMPLETED && task.savePath.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("删除下载任务") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "确定删除「${task.fileName}」吗？",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (hasLocalFile) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = deleteLocal,
+                            onCheckedChange = { deleteLocal = it }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "同时删除本地文件",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                Text(
+                    text = if (hasLocalFile) {
+                        "勾选后将一并删除已下载到 Download 目录的文件，且不可恢复。"
+                    } else {
+                        "该任务没有已完成的本地文件。"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(deleteLocal) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error
+                )
+            ) { Text("删除") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @Composable
@@ -260,6 +334,18 @@ private fun DownloadTaskCard(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
+
+            // 失败原因（红色小字展示具体错误）
+            if (task.status == DownloadTaskEntity.STATUS_FAILED && task.errorMsg.isNotBlank()) {
+                Text(
+                    text = "失败原因：${task.errorMsg}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+            }
 
             // 实时统计：速度 / 剩余时间 / 线程数
             if (isDownloading && stats != null && stats.speed > 0) {

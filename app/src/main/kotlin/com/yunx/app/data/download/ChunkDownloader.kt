@@ -1,5 +1,6 @@
 package com.yunx.app.data.download
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -83,7 +84,11 @@ class ChunkDownloader(private val client: OkHttpClient) {
                 }
                 true
             }
-        }.getOrDefault(false)
+        }.getOrElse { e ->
+            // 取消（暂停）必须向上传播，不能当作下载失败
+            if (e is CancellationException) throw e
+            false
+        }
     }
 
     /** 按顺序合并分片为完整文件 */

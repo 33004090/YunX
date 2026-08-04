@@ -56,6 +56,10 @@ class ResolveViewModel(
     private var currentDirFid = QuarkConstants.DEFAULT_PDIR_FID
     private val dirStack = ArrayDeque<String>()
 
+    /** 当前目录路径名栈（用于面包屑显示），如 [辅助工具, 专用模组] */
+    var pathNames by mutableStateOf<List<String>>(emptyList())
+        private set
+
     /** 开始解析：链接 → token →（密码）→ 根目录列表 */
     fun startResolve(link: String, pwd: String?) {
         viewModelScope.launch {
@@ -70,6 +74,7 @@ class ResolveViewModel(
                     session = s
                     currentDirFid = QuarkConstants.DEFAULT_PDIR_FID
                     dirStack.clear()
+                    pathNames = emptyList()
                     loadFiles(s, currentDirFid, cookie)
                 }
                 .onFailure { e ->
@@ -82,6 +87,7 @@ class ResolveViewModel(
     fun openFolder(file: ShareFile) {
         val s = session ?: return
         dirStack.addLast(currentDirFid)
+        pathNames = pathNames + file.fname
         currentDirFid = file.fid
         viewModelScope.launch {
             uiState = ResolveUiState.Loading
@@ -99,6 +105,7 @@ class ResolveViewModel(
         val s = session ?: return
         if (dirStack.isEmpty()) return
         currentDirFid = dirStack.removeLast()
+        pathNames = pathNames.dropLast(1)
         viewModelScope.launch {
             uiState = ResolveUiState.Loading
             val cookie = accountRepository.getAccount()?.cookie ?: return@launch
@@ -119,6 +126,7 @@ class ResolveViewModel(
     fun backToInput() {
         session = null
         downloadLink = null
+        pathNames = emptyList()
         uiState = ResolveUiState.Idle
     }
 

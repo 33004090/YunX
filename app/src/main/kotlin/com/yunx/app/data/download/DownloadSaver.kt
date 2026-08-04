@@ -50,6 +50,21 @@ object DownloadSaver {
         dest.absolutePath
     }.getOrNull()
 
+    /**
+     * 删除已保存的本地文件（配合任务删除）。
+     * @param savePath 保存时返回的 MediaStore uri 字符串或文件绝对路径
+     */
+    fun delete(context: Context, savePath: String) {
+        if (savePath.isBlank()) return
+        runCatching {
+            if (savePath.startsWith("content://")) {
+                context.contentResolver.delete(android.net.Uri.parse(savePath), null, null)
+            } else {
+                File(savePath).delete()
+            }
+        }
+    }
+
     private fun mimeOf(fileName: String): String {
         val ext = fileName.substringAfterLast('.', "").lowercase()
         return when (ext) {

@@ -30,6 +30,7 @@ import com.yunx.app.data.db.AppDatabase
 import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.QuarkApi
+import com.yunx.app.data.prefs.SettingsRepository
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
 import com.yunx.app.ui.login.QuarkLoginScreen
@@ -60,12 +61,18 @@ fun MainScreen() {
     val context = LocalContext.current
     val api = remember { QuarkApi() }
     val db = remember { AppDatabase.get(context) }
+    val settings = remember { SettingsRepository(context) }
     val repository = remember {
         QuarkAccountRepository(db.quarkAccountDao(), api)
     }
-    // 下载管理器：OkHttp 分片下载器 + Room 任务持久化
+    // 下载管理器：OkHttp 分片下载器 + Room 任务持久化 + 可配置线程数（设置页动态生效）
     val downloadManager = remember {
-        DownloadManager(context, db.downloadTaskDao(), ChunkDownloader(OkHttpClient()))
+        DownloadManager(
+            context = context,
+            dao = db.downloadTaskDao(),
+            downloader = ChunkDownloader(OkHttpClient()),
+            threadProvider = settings::downloadThreads
+        )
     }
     val viewModel: QuarkAccountViewModel = viewModel(
         factory = QuarkAccountViewModel.Factory(repository)
@@ -152,7 +159,11 @@ fun MainScreen() {
                         onQuarkLogout = { viewModel.logout() }
                     )
                     MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
-                    MainTab.Settings -> SettingsScreen(scrollBehavior)
+                    MainTab.Settings -> SettingsScreen(
+                        scrollBehavior = scrollBehavior,
+                        downloadThreads = settings.downloadThreads,
+                        onThreadsChange = { settings.downloadThreads = it }
+                    )
                 }
             }
         }

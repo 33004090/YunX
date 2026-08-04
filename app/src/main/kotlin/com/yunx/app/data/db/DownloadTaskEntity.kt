@@ -15,6 +15,8 @@ data class DownloadTaskEntity(
     val totalSize: Long = 0L,
     val downloadedSize: Long = 0L,
     val status: Int = STATUS_PENDING,
+    /** 失败原因（服务端/网络/分片等具体错误信息），成功或进行中为空 */
+    val errorMsg: String = "",
     /** 完成后的保存位置：MediaStore uri 或文件绝对路径 */
     val savePath: String = "",
     val createTime: Long = System.currentTimeMillis()

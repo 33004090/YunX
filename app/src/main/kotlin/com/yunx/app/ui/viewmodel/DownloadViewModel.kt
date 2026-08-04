@@ -35,7 +35,7 @@ class DownloadViewModel(private val manager: DownloadManager) : ViewModel() {
 
     fun resume(id: Long) = manager.start(id)
 
-    fun remove(id: Long) = manager.remove(id)
+    fun remove(id: Long, deleteLocal: Boolean = false) = manager.remove(id, deleteLocal)
 
     class Factory(private val manager: DownloadManager) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")

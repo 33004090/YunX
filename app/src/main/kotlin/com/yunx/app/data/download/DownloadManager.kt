@@ -16,7 +16,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -41,17 +43,22 @@ data class DownloadStats(
 class DownloadManager(
     private val context: Context,
     private val dao: DownloadTaskDao,
-    private val downloader: ChunkDownloader
+    private val downloader: ChunkDownloader,
+    /** 下载线程数提供者（可在设置中修改，动态生效），默认 16 */
+    private val threadProvider: () -> Int = { 16 }
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val activeJobs = ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
 
+    /** 每个任务一把互斥锁：暂停后立即恢复时避免新旧协程并发写分片 */
+    private val taskLocks = ConcurrentHashMap<Long, Mutex>()
+
+    /** 任务请求头（Cookie/UA），暂停后恢复仍需使用 */
+    private val taskHeaders = ConcurrentHashMap<Long, Map<String, String>>()
+
     /** 实时下载统计（速度/剩余时间/线程数） */
     private val _stats = MutableStateFlow<Map<Long, DownloadStats>>(emptyMap())
     val stats: StateFlow<Map<Long, DownloadStats>> = _stats.asStateFlow()
-
-    /** 默认分片并发数 */
-    private val maxConcurrency = 3
 
     /** 进度上报节流阈值（字节） */
     private val progressThrottle = 512 * 1024L
@@ -71,6 +78,8 @@ class DownloadManager(
                 fileName = safeName
             )
         )
+        // 保存请求头（Cookie/UA），暂停后恢复仍需携带
+        if (headers.isNotEmpty()) taskHeaders[id] = headers
         start(id, headers)
         return id
     }
@@ -78,35 +87,51 @@ class DownloadManager(
     /** 开始/恢复下载（断点续传） */
     fun start(id: Long, headers: Map<String, String> = emptyMap()) {
         if (activeJobs.containsKey(id)) return
+        // 恢复时未传 headers：沿用入队时保存的（Cookie/UA 对直链下载是必需的）
+        val effectiveHeaders = headers.ifEmpty { taskHeaders[id] ?: emptyMap() }
         val job = scope.launch {
             try {
-                runTask(id, headers)
+                // 任务级互斥：同一任务串行执行，暂停后立刻恢复不会并发写分片
+                taskLocks.getOrPut(id) { Mutex() }.withLock {
+                    runTask(id, effectiveHeaders)
+                }
             } catch (e: CancellationException) {
-                // 主动暂停：保留 part 文件，状态置为 PAUSED
+                // 主动暂停：part 文件保留；状态已由 pause() 设置，此处只清理统计
+                // （不写状态，避免覆盖暂停后立刻恢复的新任务状态）
                 _stats.update { it - id }
-                dao.updateStatus(id, DownloadTaskEntity.STATUS_PAUSED)
             } catch (e: Exception) {
                 _stats.update { it - id }
                 dao.updateStatus(id, DownloadTaskEntity.STATUS_FAILED)
+                dao.updateError(id, e.message ?: e.javaClass.simpleName)
             } finally {
                 activeJobs.remove(id)
+                // 注意：taskLocks 不在此清理 —— 若新任务已 getOrPut 拿到锁，
+                // 旧任务 finally 的 remove 会误删新任务的锁导致并发写分片
             }
         }
         activeJobs[id] = job
     }
 
-    /** 暂停下载（保留 part 文件） */
+    /** 暂停下载（保留 part 文件与请求头） */
     fun pause(id: Long) {
         activeJobs.remove(id)?.cancel()
         _stats.update { it - id }
         scope.launch { dao.updateStatus(id, DownloadTaskEntity.STATUS_PAUSED) }
     }
 
-    /** 删除任务：取消下载 + 清 DB + 清 part 文件 */
-    fun remove(id: Long) {
+    /**
+     * 删除任务：取消下载 + 清 DB + 清 part 文件。
+     * @param deleteLocal 同时删除已保存到本地的文件（savePath）
+     */
+    fun remove(id: Long, deleteLocal: Boolean = false) {
         activeJobs.remove(id)?.cancel()
         _stats.update { it - id }
+        taskHeaders.remove(id)
+        taskLocks.remove(id)
         scope.launch {
+            if (deleteLocal) {
+                dao.get(id)?.savePath?.let { DownloadSaver.delete(context, it) }
+            }
             dao.delete(id)
             chunkDirOf(id).deleteRecursively()
         }
@@ -126,8 +151,9 @@ class DownloadManager(
         val chunkSize = ceil(total.toDouble() / chunkCount).toLong()
         val chunkDir = chunkDirOf(id).apply { mkdirs() }
 
-        // 注册实时统计（线程数=分片数）
-        _stats.update { it + (id to DownloadStats(0L, -1L, chunkCount)) }
+        // 注册实时统计：线程数 = 用户设置的线程数（非分片数）
+        val threadCount = threadProvider().coerceAtLeast(1)
+        _stats.update { it + (id to DownloadStats(0L, -1L, threadCount)) }
 
         // 统计已有 part 大小（断点续传起点）
         val downloaded = AtomicLong(0)
@@ -138,7 +164,9 @@ class DownloadManager(
 
         val lastUpdate = AtomicLong(downloaded.get())
         val speedRecorder = SpeedRecorder()
-        val semaphore = Semaphore(maxConcurrency)
+        val semaphore = Semaphore(threadCount)
+        // 记录第一个失败分片的具体原因
+        val failedReason = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
         val allOk = coroutineScope {
             val results = (0 until chunkCount).map { i ->
@@ -146,32 +174,39 @@ class DownloadManager(
                     semaphore.withPermit {
                         val start = i * chunkSize
                         val end = min(start + chunkSize - 1, total - 1)
-                        downloader.downloadChunk(
-                            url = task.url,
-                            start = start,
-                            end = end,
-                            partFile = File(chunkDir, "part_$i"),
-                            headers = headers
-                        ) { bytes ->
-                            val new = downloaded.addAndGet(bytes)
-                            // 速度/剩余时间统计（每 500ms 更新一次）
-                            speedRecorder.onBytes(new)?.let { speed ->
-                                val remain = if (speed > 0) (total - new) * 1000 / speed else -1L
-                                _stats.update { it + (id to DownloadStats(speed, remain, chunkCount)) }
-                            }
-                            val last = lastUpdate.get()
-                            if (new - last >= progressThrottle || new >= total) {
-                                if (lastUpdate.compareAndSet(last, new)) {
-                                    dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
+                        try {
+                            downloader.downloadChunk(
+                                url = task.url,
+                                start = start,
+                                end = end,
+                                partFile = File(chunkDir, "part_$i"),
+                                headers = headers
+                            ) { bytes ->
+                                val new = downloaded.addAndGet(bytes)
+                                // 速度/剩余时间统计（每 500ms 更新一次）
+                                speedRecorder.onBytes(new)?.let { speed ->
+                                    val remain = if (speed > 0) (total - new) * 1000 / speed else -1L
+                                    _stats.update { it + (id to DownloadStats(speed, remain, threadCount)) }
+                                }
+                                val last = lastUpdate.get()
+                                if (new - last >= progressThrottle || new >= total) {
+                                    if (lastUpdate.compareAndSet(last, new)) {
+                                        dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
+                                    }
                                 }
                             }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            failedReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount：${e.message ?: e.javaClass.simpleName}")
+                            false
                         }
                     }
                 }
             }.awaitAll()
             results.all { it }
         }
-        if (!allOk) throw IllegalStateException("分片下载失败")
+        if (!allOk) throw IllegalStateException(failedReason.get() ?: "分片下载失败")
 
         // 合并分片
         val merged = File(context.cacheDir, "merged_$id")
@@ -217,8 +252,8 @@ class DownloadManager(
     private fun chunkCountFor(total: Long): Int = when {
         total <= 0 -> 1
         total < 5 * 1024 * 1024 -> 1          // < 5MB
-        total < 50 * 1024 * 1024 -> 3         // < 50MB
-        total < 500 * 1024 * 1024 -> 5        // < 500MB
-        else -> 8
+        total < 50 * 1024 * 1024 -> 4         // < 50MB
+        total < 500 * 1024 * 1024 -> 8        // < 500MB
+        else -> 16                            // ≥ 500MB，配合高线程数
     }
 }
