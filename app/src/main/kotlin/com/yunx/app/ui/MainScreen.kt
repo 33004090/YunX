@@ -28,6 +28,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yunx.app.data.db.AppDatabase
 import com.yunx.app.data.network.QuarkApi
 import com.yunx.app.data.repository.QuarkAccountRepository
+import com.yunx.app.data.repository.QuarkResolveRepository
 import com.yunx.app.ui.login.QuarkLoginScreen
 import com.yunx.app.ui.navigation.MainTab
 import com.yunx.app.ui.screens.DownloadScreen
@@ -35,6 +36,7 @@ import com.yunx.app.ui.screens.DriveScreen
 import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
+import com.yunx.app.ui.viewmodel.ResolveViewModel
 
 /**
  * 主页框架：
@@ -51,14 +53,15 @@ fun MainScreen() {
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
+    val api = remember { QuarkApi() }
     val repository = remember {
-        QuarkAccountRepository(
-            AppDatabase.get(context).quarkAccountDao(),
-            QuarkApi()
-        )
+        QuarkAccountRepository(AppDatabase.get(context).quarkAccountDao(), api)
     }
     val viewModel: QuarkAccountViewModel = viewModel(
         factory = QuarkAccountViewModel.Factory(repository)
+    )
+    val resolveViewModel: ResolveViewModel = viewModel(
+        factory = ResolveViewModel.Factory(repository, QuarkResolveRepository(api))
     )
     val quarkAccount by viewModel.quarkAccount.collectAsState()
 
@@ -120,7 +123,7 @@ fun MainScreen() {
             // 每个页面独立保存状态，切换 Tab 再切回来不丢失
             saveableStateHolder.SaveableStateProvider(currentTab) {
                 when (currentTab) {
-                    MainTab.Resolve -> ResolveScreen(scrollBehavior)
+                    MainTab.Resolve -> ResolveScreen(scrollBehavior, resolveViewModel)
                     MainTab.Drive -> DriveScreen(
                         scrollBehavior = scrollBehavior,
                         quarkAccount = quarkAccount,

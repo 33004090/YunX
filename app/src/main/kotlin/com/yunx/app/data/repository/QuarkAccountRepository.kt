@@ -16,6 +16,8 @@ class QuarkAccountRepository(
 
     fun observeAccount(): Flow<QuarkAccountEntity?> = dao.observeAccount()
 
+    suspend fun getAccount(): QuarkAccountEntity? = dao.getAccount()
+
     /** 退出登录：清除本地 Cookie */
     suspend fun logoutQuark() {
         dao.clear()

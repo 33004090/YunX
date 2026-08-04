@@ -15,6 +15,9 @@ interface QuarkAccountDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(account: QuarkAccountEntity)
 
+    @Query("SELECT * FROM quark_account WHERE id = 'quark'")
+    suspend fun getAccount(): QuarkAccountEntity?
+
     @Query("DELETE FROM quark_account WHERE id = 'quark'")
     suspend fun clear()
 }
