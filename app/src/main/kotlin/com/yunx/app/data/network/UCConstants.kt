@@ -7,10 +7,7 @@ package com.yunx.app.data.network
 object UCConstants {
 
     /** UC 网盘客户端 User-Agent */
-    const val USER_AGENT =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-        "uc-cloud-drive/1.6.1 Chrome/100.0.4896.160 Electron/18.3.5.16-b62cf9c50d Safari/537.36 Channel/ucpan_other_ch"
-
+    const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     /** WebView 登录页 */
     const val LOGIN_URL = "https://drive.uc.cn/"
 
