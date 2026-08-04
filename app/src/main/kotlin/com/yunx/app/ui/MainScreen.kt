@@ -124,7 +124,8 @@ fun MainScreen() {
                     MainTab.Drive -> DriveScreen(
                         scrollBehavior = scrollBehavior,
                         quarkAccount = quarkAccount,
-                        onQuarkLogin = { showQuarkLogin = true }
+                        onQuarkLogin = { showQuarkLogin = true },
+                        onQuarkLogout = { viewModel.logout() }
                     )
                     MainTab.Download -> DownloadScreen(scrollBehavior)
                     MainTab.Settings -> SettingsScreen(scrollBehavior)

@@ -16,6 +16,11 @@ class QuarkAccountRepository(
 
     fun observeAccount(): Flow<QuarkAccountEntity?> = dao.observeAccount()
 
+    /** 退出登录：清除本地 Cookie */
+    suspend fun logoutQuark() {
+        dao.clear()
+    }
+
     /**
      * 校验 Cookie 有效性；有效则拉取昵称并落库，返回 true；无效返回 false。
      */

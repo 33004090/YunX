@@ -8,6 +8,7 @@ import com.yunx.app.data.repository.QuarkAccountRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * 夸克账号 ViewModel：暴露登录态，供主页与登录页共享。
@@ -26,6 +27,11 @@ class QuarkAccountViewModel(
     /** 保存夸克 Cookie；返回是否保存成功 */
     suspend fun saveQuarkAccount(cookie: String): Boolean =
         repository.saveQuarkAccount(cookie)
+
+    /** 退出登录：清除本地 Cookie */
+    fun logout() {
+        viewModelScope.launch { repository.logoutQuark() }
+    }
 
     class Factory(
         private val repository: QuarkAccountRepository

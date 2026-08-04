@@ -24,7 +24,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -45,7 +48,9 @@ private data class DriveAccount(
 )
 
 /**
- * 网盘页：夸克登录态来自 Room，已登录时副标题显示用户昵称；未登录可点击进入登录页。
+ * 网盘页：
+ * - 夸克未登录：点击进入登录页；
+ * - 夸克已登录：副标题显示昵称，点击弹出账号信息底部弹窗（可查看 Cookie / 退出登录）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,8 +58,11 @@ fun DriveScreen(
     scrollBehavior: TopAppBarScrollBehavior,
     quarkAccount: QuarkAccountEntity?,
     onQuarkLogin: () -> Unit,
+    onQuarkLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showQuarkSheet by remember { mutableStateOf(false) }
+
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
         id = "quark",
@@ -88,12 +96,28 @@ fun DriveScreen(
         item(key = quark.id) {
             DriveAccountCard(
                 account = quark,
-                onClick = if (quark.isLoggedIn) null else onQuarkLogin
+                onClick = if (quark.isLoggedIn) {
+                    { showQuarkSheet = true }
+                } else {
+                    onQuarkLogin
+                }
             )
         }
         items(others, key = { it.id }) { account ->
             DriveAccountCard(account = account)
         }
+    }
+
+    // 已登录夸克：点击卡片弹出账号信息底部弹窗
+    if (showQuarkSheet && quarkAccount != null) {
+        QuarkAccountSheet(
+            account = quarkAccount,
+            onLogout = {
+                onQuarkLogout()
+                showQuarkSheet = false
+            },
+            onDismiss = { showQuarkSheet = false }
+        )
     }
 }
 
