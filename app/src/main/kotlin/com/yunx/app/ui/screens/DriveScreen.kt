@@ -30,10 +30,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.yunx.app.data.db.QuarkAccountEntity
 
 /**
- * 网盘账号模型。
- * TODO: 后续接入 cookie 登录后，isLoggedIn 由真实登录态驱动。
+ * 网盘账号展示模型。
+ * TODO: 迅雷 / UC 后续接入 cookie 登录后，isLoggedIn 由真实登录态驱动。
  */
 private data class DriveAccount(
     val id: String,
@@ -44,17 +45,26 @@ private data class DriveAccount(
 )
 
 /**
- * 网盘页：展示各网盘账号及其登录状态（先完成布局框架）。
+ * 网盘页：夸克登录态来自 Room，已登录时副标题显示用户昵称；未登录可点击进入登录页。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DriveScreen(
     scrollBehavior: TopAppBarScrollBehavior,
+    quarkAccount: QuarkAccountEntity?,
+    onQuarkLogin: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val accounts = remember {
+    // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
+    val quark = DriveAccount(
+        id = "quark",
+        name = "夸克网盘",
+        description = quarkAccount?.nickname ?: "点击登录，支持解析下载",
+        avatarText = "夸",
+        isLoggedIn = quarkAccount != null
+    )
+    val others = remember {
         listOf(
-            DriveAccount(id = "quark", name = "夸克网盘", description = "主流分享链接解析下载", avatarText = "夸"),
             DriveAccount(id = "xunlei", name = "迅雷网盘", description = "迅雷云盘高速下载", avatarText = "迅"),
             DriveAccount(id = "uc", name = "UC网盘", description = "UC 网盘存储服务", avatarText = "UC")
         )
@@ -75,66 +85,101 @@ fun DriveScreen(
                 modifier = Modifier.padding(bottom = 4.dp)
             )
         }
-        items(accounts, key = { it.id }) { account ->
+        item(key = quark.id) {
+            DriveAccountCard(
+                account = quark,
+                onClick = if (quark.isLoggedIn) null else onQuarkLogin
+            )
+        }
+        items(others, key = { it.id }) { account ->
             DriveAccountCard(account = account)
         }
     }
 }
 
 @Composable
-private fun DriveAccountCard(account: DriveAccount) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        )
+private fun DriveAccountCard(
+    account: DriveAccount,
+    onClick: (() -> Unit)? = null
+) {
+    val cardShape = MaterialTheme.shapes.large
+    val cardColors = CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    )
+    val content: @Composable () -> Unit = {
+        DriveAccountCardContent(account = account, clickable = onClick != null)
+    }
+
+    if (onClick != null) {
+        Card(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(),
+            shape = cardShape,
+            colors = cardColors
+        ) { content() }
+    } else {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = cardShape,
+            colors = cardColors
+        ) { content() }
+    }
+}
+
+@Composable
+private fun DriveAccountCardContent(account: DriveAccount, clickable: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // 品牌头像（暂用首字母，后续可替换为品牌图标）
+        Surface(
+            modifier = Modifier.size(48.dp),
+            shape = CircleShape,
+            color = if (account.isLoggedIn) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            }
         ) {
-            // 品牌头像（暂用首字母，后续可替换为品牌图标）
-            Surface(
-                modifier = Modifier.size(48.dp),
-                shape = CircleShape,
-                color = if (account.isLoggedIn) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHighest
-                }
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = account.avatarText,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 16.dp)
-            ) {
+            Box(contentAlignment = Alignment.Center) {
                 Text(
-                    text = account.name,
+                    text = account.avatarText,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = account.description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
+        }
 
-            LoginBadge(isLoggedIn = account.isLoggedIn)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 16.dp)
+        ) {
+            Text(
+                text = account.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = account.description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        when {
+            account.isLoggedIn -> LoginBadge(isLoggedIn = true)
+            clickable -> Text(
+                text = "去登录",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            else -> LoginBadge(isLoggedIn = false)
         }
     }
 }

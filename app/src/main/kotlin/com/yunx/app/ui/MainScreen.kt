@@ -14,30 +14,63 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yunx.app.data.db.AppDatabase
+import com.yunx.app.data.network.QuarkApi
+import com.yunx.app.data.repository.QuarkAccountRepository
+import com.yunx.app.ui.login.QuarkLoginScreen
 import com.yunx.app.ui.navigation.MainTab
 import com.yunx.app.ui.screens.DownloadScreen
 import com.yunx.app.ui.screens.DriveScreen
 import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
+import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 
 /**
  * 主页框架：
  * - 顶部可折叠大标题（LargeTopAppBar），切换 Tab 时标题文字随 Tab 变化，折叠状态不受影响；
  * - 底部 4 个导航 Tab（解析 / 网盘 / 下载 / 设置）；
- * - 通过 SaveableStateHolder 保存各页面状态，切换 Tab 再切回来不会重置。
+ * - 通过 SaveableStateHolder 保存各页面状态，切换 Tab 再切回来不会重置；
+ * - 夸克登录页全屏覆盖展示。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
     var currentTab by rememberSaveable { mutableStateOf(MainTab.Resolve) }
+    var showQuarkLogin by rememberSaveable { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
+
+    val context = LocalContext.current
+    val repository = remember {
+        QuarkAccountRepository(
+            AppDatabase.get(context).quarkAccountDao(),
+            QuarkApi()
+        )
+    }
+    val viewModel: QuarkAccountViewModel = viewModel(
+        factory = QuarkAccountViewModel.Factory(repository)
+    )
+    val quarkAccount by viewModel.quarkAccount.collectAsState()
+
+    // 夸克登录页：全屏覆盖（不含底部导航与折叠标题）
+    if (showQuarkLogin) {
+        QuarkLoginScreen(
+            viewModel = viewModel,
+            onBack = { showQuarkLogin = false },
+            onSaved = { showQuarkLogin = false }
+        )
+        return
+    }
 
     // 折叠标题状态提升到本层：跨页面共享，页面切换时折叠/展开状态保持不变
     val topAppBarState = rememberTopAppBarState()
@@ -88,7 +121,11 @@ fun MainScreen() {
             saveableStateHolder.SaveableStateProvider(currentTab) {
                 when (currentTab) {
                     MainTab.Resolve -> ResolveScreen(scrollBehavior)
-                    MainTab.Drive -> DriveScreen(scrollBehavior)
+                    MainTab.Drive -> DriveScreen(
+                        scrollBehavior = scrollBehavior,
+                        quarkAccount = quarkAccount,
+                        onQuarkLogin = { showQuarkLogin = true }
+                    )
                     MainTab.Download -> DownloadScreen(scrollBehavior)
                     MainTab.Settings -> SettingsScreen(scrollBehavior)
                 }

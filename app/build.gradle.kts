@@ -38,6 +38,8 @@ android {
 
 dependencies {
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")  
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)          // 提供协程扩展，如 Flow、suspend

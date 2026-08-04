@@ -140,11 +140,6 @@
         },
         {
           "type": "library",
-          "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22",
-          "scope": "compile"
-        },
-        {
-          "type": "library",
           "name": "androidx.collection:collection-jvm:1.5.0",
           "scope": "compile"
         },
@@ -155,12 +150,12 @@
         },
         {
           "type": "library",
-          "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22",
+          "name": "transformed:core-viewtree-1.0.0:jars:classes",
           "scope": "compile"
         },
         {
           "type": "library",
-          "name": "transformed:core-viewtree-1.0.0:jars:classes",
+          "name": "transformed:lifecycle-viewmodel-compose-release:jars:classes",
           "scope": "compile"
         },
         {
@@ -170,7 +165,17 @@
         },
         {
           "type": "library",
+          "name": "com.squareup.okio:okio-jvm:3.6.0",
+          "scope": "compile"
+        },
+        {
+          "type": "library",
           "name": "transformed:lifecycle-runtime-ktx:jars:classes",
+          "scope": "compile"
+        },
+        {
+          "type": "library",
+          "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.10",
           "scope": "compile"
         },
         {
@@ -350,6 +355,16 @@
         },
         {
           "type": "library",
+          "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.10",
+          "scope": "compile"
+        },
+        {
+          "type": "library",
+          "name": "com.squareup.okhttp3:okhttp:4.12.0",
+          "scope": "compile"
+        },
+        {
+          "type": "library",
           "name": "transformed:autofill-1.0.0:jars:classes",
           "scope": "compile"
         },
@@ -430,6 +445,28 @@
           "sourceRoots": [
             {
               "path": "/storage/emulated/0/AndroidIDEProjects/YunX/app/src/main/kotlin",
+              "type": "kotlin-source"
+            }
+          ]
+        },
+        {
+          "path": "/storage/emulated/0/AndroidIDEProjects/YunX/app/build/generated/ap_generated_sources/debug/out",
+          "excludedPatterns": [],
+          "excludedUrls": [],
+          "sourceRoots": [
+            {
+              "path": "/storage/emulated/0/AndroidIDEProjects/YunX/app/build/generated/ap_generated_sources/debug/out",
+              "type": "java-source"
+            }
+          ]
+        },
+        {
+          "path": "/storage/emulated/0/AndroidIDEProjects/YunX/app/build/generated/ksp/debug",
+          "excludedPatterns": [],
+          "excludedUrls": [],
+          "sourceRoots": [
+            {
+              "path": "/storage/emulated/0/AndroidIDEProjects/YunX/app/build/generated/ksp/debug",
               "type": "kotlin-source"
             }
           ]
@@ -567,11 +604,6 @@
         },
         {
           "type": "library",
-          "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22",
-          "scope": "compile"
-        },
-        {
-          "type": "library",
           "name": "androidx.collection:collection-jvm:1.5.0",
           "scope": "compile"
         },
@@ -582,12 +614,12 @@
         },
         {
           "type": "library",
-          "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22",
+          "name": "transformed:core-viewtree-1.0.0:jars:classes",
           "scope": "compile"
         },
         {
           "type": "library",
-          "name": "transformed:core-viewtree-1.0.0:jars:classes",
+          "name": "transformed:lifecycle-viewmodel-compose-release:jars:classes",
           "scope": "compile"
         },
         {
@@ -597,7 +629,17 @@
         },
         {
           "type": "library",
+          "name": "com.squareup.okio:okio-jvm:3.6.0",
+          "scope": "compile"
+        },
+        {
+          "type": "library",
           "name": "transformed:lifecycle-runtime-ktx:jars:classes",
+          "scope": "compile"
+        },
+        {
+          "type": "library",
+          "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.10",
           "scope": "compile"
         },
         {
@@ -773,6 +815,16 @@
         {
           "type": "library",
           "name": "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1",
+          "scope": "compile"
+        },
+        {
+          "type": "library",
+          "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.10",
+          "scope": "compile"
+        },
+        {
+          "type": "library",
+          "name": "com.squareup.okhttp3:okhttp:4.12.0",
           "scope": "compile"
         },
         {
@@ -1055,16 +1107,6 @@
       ]
     },
     {
-      "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22",
-      "type": "COMPILE",
-      "roots": [
-        {
-          "path": "/home/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib-jdk7/1.8.22/4dabb8248310d833bb6a8b516024a91fd3d275c/kotlin-stdlib-jdk7-1.8.22.jar",
-          "type": "CLASSES"
-        }
-      ]
-    },
-    {
       "name": "androidx.collection:collection-jvm:1.5.0",
       "type": "COMPILE",
       "roots": [
@@ -1085,21 +1127,21 @@
       ]
     },
     {
-      "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22",
-      "type": "COMPILE",
-      "roots": [
-        {
-          "path": "/home/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib-jdk8/1.8.22/b25c86d47d6b962b9cf0f8c3f320c8a10eea3dd1/kotlin-stdlib-jdk8-1.8.22.jar",
-          "type": "CLASSES"
-        }
-      ]
-    },
-    {
       "name": "transformed:core-viewtree-1.0.0:jars:classes",
       "type": "COMPILE",
       "roots": [
         {
           "path": "/home/.gradle/caches/9.0.0/transforms/6b73abf2f59b23c089c0c82b2a255c6e/transformed/core-viewtree-1.0.0/jars/classes.jar",
+          "type": "CLASSES"
+        }
+      ]
+    },
+    {
+      "name": "transformed:lifecycle-viewmodel-compose-release:jars:classes",
+      "type": "COMPILE",
+      "roots": [
+        {
+          "path": "/home/.gradle/caches/9.0.0/transforms/c6d5d68bd141ab7126a610ce785dbab3/transformed/lifecycle-viewmodel-compose-release/jars/classes.jar",
           "type": "CLASSES"
         }
       ]
@@ -1115,11 +1157,31 @@
       ]
     },
     {
+      "name": "com.squareup.okio:okio-jvm:3.6.0",
+      "type": "COMPILE",
+      "roots": [
+        {
+          "path": "/home/.gradle/caches/modules-2/files-2.1/com.squareup.okio/okio-jvm/3.6.0/5600569133b7bdefe1daf9ec7f4abeb6d13e1786/okio-jvm-3.6.0.jar",
+          "type": "CLASSES"
+        }
+      ]
+    },
+    {
       "name": "transformed:lifecycle-runtime-ktx:jars:classes",
       "type": "COMPILE",
       "roots": [
         {
           "path": "/home/.gradle/caches/9.0.0/transforms/254e728ebbea6b07728db0835b9f61a0/transformed/lifecycle-runtime-ktx/jars/classes.jar",
+          "type": "CLASSES"
+        }
+      ]
+    },
+    {
+      "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.10",
+      "type": "COMPILE",
+      "roots": [
+        {
+          "path": "/home/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib-jdk8/1.9.10/c7510d64a83411a649c76f2778304ddf71d7437b/kotlin-stdlib-jdk8-1.9.10.jar",
           "type": "CLASSES"
         }
       ]
@@ -1470,6 +1532,26 @@
       "roots": [
         {
           "path": "/home/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-android/1.8.1/73e2acdd18df99dd4849d99f188dff529fc0afe0/kotlinx-coroutines-android-1.8.1.jar",
+          "type": "CLASSES"
+        }
+      ]
+    },
+    {
+      "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.10",
+      "type": "COMPILE",
+      "roots": [
+        {
+          "path": "/home/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib-jdk7/1.9.10/bc5bfc2690338defd5195b05c57562f2194eeb10/kotlin-stdlib-jdk7-1.9.10.jar",
+          "type": "CLASSES"
+        }
+      ]
+    },
+    {
+      "name": "com.squareup.okhttp3:okhttp:4.12.0",
+      "type": "COMPILE",
+      "roots": [
+        {
+          "path": "/home/.gradle/caches/modules-2/files-2.1/com.squareup.okhttp3/okhttp/4.12.0/2f4525d4a200e97e1b87449c2cd9bd2e25b7e8cd/okhttp-4.12.0.jar",
           "type": "CLASSES"
         }
       ]
