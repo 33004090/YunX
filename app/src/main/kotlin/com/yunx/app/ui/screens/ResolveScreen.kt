@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.Button
@@ -23,6 +24,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -59,6 +61,18 @@ fun ResolveScreen(
     val downloadError = viewModel.downloadError
     val context = LocalContext.current
 
+    // 输入框状态提升到页面层：进入详情/文件夹再返回时不清空
+    var link by rememberSaveable { mutableStateOf("") }
+    var pwd by rememberSaveable { mutableStateOf("") }
+    var pwdEdited by rememberSaveable { mutableStateOf(false) }
+
+    // 链接变化时自动匹配提取码（用户未手动输入时）
+    LaunchedEffect(link) {
+        if (!pwdEdited && pwd.isEmpty()) {
+            ShareLinkParser.parse(link)?.pwd?.let { pwd = it }
+        }
+    }
+
     // 下载错误提示
     LaunchedEffect(downloadError) {
         downloadError?.let {
@@ -74,13 +88,25 @@ fun ResolveScreen(
                 files = state.files,
                 viewModel = viewModel,
                 scrollBehavior = scrollBehavior,
+                // 顶部左上角返回：退出文件页回到输入页（输入框内容保留）
+                onExit = { viewModel.backToInput() },
+                // 列表「返回上一级」：子目录回上级，根目录回输入页
                 onBack = { viewModel.navigateBack() }
             )
             is ResolveUiState.Loading -> LoadingContent()
             else -> ResolveInputContent(
                 viewModel = viewModel,
                 scrollBehavior = scrollBehavior,
-                state = state
+                state = state,
+                link = link,
+                onLinkChange = { link = it },
+                pwd = pwd,
+                onPwdChange = {
+                    pwd = it
+                    pwdEdited = true
+                },
+                onClearLink = { link = "" },
+                onClearPwd = { pwd = "" }
             )
         }
     }
@@ -100,19 +126,15 @@ fun ResolveScreen(
 private fun ResolveInputContent(
     viewModel: ResolveViewModel,
     scrollBehavior: TopAppBarScrollBehavior,
-    state: ResolveUiState
+    state: ResolveUiState,
+    link: String,
+    onLinkChange: (String) -> Unit,
+    pwd: String,
+    onPwdChange: (String) -> Unit,
+    onClearLink: () -> Unit,
+    onClearPwd: () -> Unit
 ) {
-    var link by rememberSaveable { mutableStateOf("") }
-    var pwd by rememberSaveable { mutableStateOf("") }
-    var pwdEdited by rememberSaveable { mutableStateOf(false) }
     val isLoading = state is ResolveUiState.Loading
-
-    // 链接变化时自动匹配提取码（用户未手动输入时）
-    LaunchedEffect(link) {
-        if (!pwdEdited) {
-            ShareLinkParser.parse(link)?.pwd?.let { pwd = it }
-        }
-    }
 
     Column(
         modifier = Modifier
@@ -130,10 +152,17 @@ private fun ResolveInputContent(
 
         OutlinedTextField(
             value = link,
-            onValueChange = { link = it },
+            onValueChange = onLinkChange,
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("例如：https://pan.quark.cn/s/xxxx") },
             leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
+            trailingIcon = {
+                if (link.isNotEmpty()) {
+                    IconButton(onClick = onClearLink) {
+                        Icon(Icons.Filled.Close, contentDescription = "清空链接")
+                    }
+                }
+            },
             minLines = 3,
             maxLines = 6,
             shape = MaterialTheme.shapes.large
@@ -141,13 +170,17 @@ private fun ResolveInputContent(
 
         OutlinedTextField(
             value = pwd,
-            onValueChange = {
-                pwd = it
-                pwdEdited = true
-            },
+            onValueChange = onPwdChange,
             modifier = Modifier.fillMaxWidth(),
             label = { Text("提取码（可选）") },
             placeholder = { Text("自动识别或手动输入") },
+            trailingIcon = {
+                if (pwd.isNotEmpty()) {
+                    IconButton(onClick = onClearPwd) {
+                        Icon(Icons.Filled.Close, contentDescription = "清空提取码")
+                    }
+                }
+            },
             singleLine = true,
             shape = MaterialTheme.shapes.large
         )

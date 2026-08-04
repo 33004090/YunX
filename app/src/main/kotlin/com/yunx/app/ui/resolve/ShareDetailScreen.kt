@@ -1,5 +1,8 @@
 package com.yunx.app.ui.resolve
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -32,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -53,9 +58,13 @@ fun ShareDetailScreen(
     files: List<ShareFile>,
     viewModel: ResolveViewModel,
     scrollBehavior: TopAppBarScrollBehavior,
+    /** 顶部左上角返回：退出文件页回到输入页 */
+    onExit: () -> Unit,
+    /** 列表「返回上一级」：子目录回上级，根目录回输入页 */
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val pathNames = viewModel.pathNames
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -66,7 +75,7 @@ fun ShareDetailScreen(
         item {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onExit) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                     Column(modifier = Modifier.weight(1f)) {
@@ -85,12 +94,19 @@ fun ShareDetailScreen(
                     }
                 }
                 // 当前路径（面包屑）：/ 或 /辅助工具/专用模组/
-                val pathNames = viewModel.pathNames
+                // 可横向滚动，并始终定位到末尾（当前所在目录）
                 val pathText = if (pathNames.isEmpty()) "/"
                 else "/" + pathNames.joinToString("/") + "/"
+                val pathScroll = rememberScrollState()
+                LaunchedEffect(pathText) {
+                    pathScroll.scrollTo(pathScroll.maxValue)
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 8.dp, top = 2.dp)
+                    modifier = Modifier
+                        .padding(start = 8.dp, top = 2.dp)
+                        .fillMaxWidth()
+                        .horizontalScroll(pathScroll)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.FolderOpen,
@@ -103,16 +119,17 @@ fun ShareDetailScreen(
                         text = pathText,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 1
                     )
                 }
             }
         }
 
-        // 返回上一级（单独列表项；根目录时返回输入页）
-        item {
-            BackToParentItem(onClick = onBack)
+        // 返回上一级（单独列表项；根目录时不显示）
+        if (pathNames.isNotEmpty()) {
+            item {
+                BackToParentItem(onClick = onBack)
+            }
         }
 
         if (files.isEmpty()) {
@@ -173,6 +190,7 @@ private fun BackToParentItem(onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ShareFileRow(file: ShareFile, onClick: () -> Unit) {
     Card(
@@ -213,11 +231,12 @@ private fun ShareFileRow(file: ShareFile, onClick: () -> Unit) {
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
+                // 文件名过长时滚动播放显示
                 Text(
                     text = file.fname,
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(

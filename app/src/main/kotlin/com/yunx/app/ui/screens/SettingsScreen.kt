@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +53,9 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     var showThreadsDialog by remember { mutableStateOf(false) }
+    // 本地状态：修改后立即刷新 UI，同时同步外部保存值
+    var threads by remember { mutableStateOf(downloadThreads) }
+    LaunchedEffect(downloadThreads) { threads = downloadThreads }
 
     Column(
         modifier = modifier
@@ -64,7 +68,7 @@ fun SettingsScreen(
         SettingsItem(
             icon = Icons.Outlined.Tune,
             title = "下载线程数",
-            description = "当前 $downloadThreads 线程（分片并发）",
+            description = "当前 $threads 线程（分片并发）",
             onClick = { showThreadsDialog = true }
         )
 
@@ -112,8 +116,9 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = downloadThreads == value,
+                                selected = threads == value,
                                 onClick = {
+                                    threads = value
                                     onThreadsChange(value)
                                     showThreadsDialog = false
                                 }
