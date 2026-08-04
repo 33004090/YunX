@@ -30,10 +30,14 @@ import com.yunx.app.data.db.AppDatabase
 import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.QuarkApi
+import com.yunx.app.data.network.UCApi
 import com.yunx.app.data.prefs.SettingsRepository
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
+import com.yunx.app.data.repository.UCAccountRepository
+import com.yunx.app.data.repository.UCResolveRepository
 import com.yunx.app.ui.login.QuarkLoginScreen
+import com.yunx.app.ui.login.UCLoginScreen
 import com.yunx.app.ui.navigation.MainTab
 import com.yunx.app.ui.screens.DownloadScreen
 import com.yunx.app.ui.screens.DriveScreen
@@ -42,6 +46,7 @@ import com.yunx.app.ui.screens.SettingsScreen
 import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
+import com.yunx.app.ui.viewmodel.UCAccountViewModel
 import okhttp3.OkHttpClient
 
 /**
@@ -56,14 +61,19 @@ import okhttp3.OkHttpClient
 fun MainScreen() {
     var currentTab by rememberSaveable { mutableStateOf(MainTab.Resolve) }
     var showQuarkLogin by rememberSaveable { mutableStateOf(false) }
+    var showUCLogin by rememberSaveable { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
     val api = remember { QuarkApi() }
+    val ucApi = remember { UCApi() }
     val db = remember { AppDatabase.get(context) }
     val settings = remember { SettingsRepository(context) }
     val repository = remember {
         QuarkAccountRepository(db.quarkAccountDao(), api)
+    }
+    val ucRepository = remember {
+        UCAccountRepository(db.ucAccountDao(), ucApi)
     }
     // 下载管理器：OkHttp 分片下载器 + Room 任务持久化 + 可配置线程数（设置页动态生效）
     val downloadManager = remember {
@@ -77,13 +87,23 @@ fun MainScreen() {
     val viewModel: QuarkAccountViewModel = viewModel(
         factory = QuarkAccountViewModel.Factory(repository)
     )
+    val ucViewModel: UCAccountViewModel = viewModel(
+        factory = UCAccountViewModel.Factory(ucRepository)
+    )
     val resolveViewModel: ResolveViewModel = viewModel(
-        factory = ResolveViewModel.Factory(repository, QuarkResolveRepository(api), downloadManager)
+        factory = ResolveViewModel.Factory(
+            repository,
+            QuarkResolveRepository(api),
+            ucRepository,
+            UCResolveRepository(ucApi),
+            downloadManager
+        )
     )
     val downloadViewModel: DownloadViewModel = viewModel(
         factory = DownloadViewModel.Factory(downloadManager)
     )
     val quarkAccount by viewModel.quarkAccount.collectAsState()
+    val ucAccount by ucViewModel.ucAccount.collectAsState()
 
     // 解析页发起下载后，自动切换到「下载」Tab
     LaunchedEffect(resolveViewModel.downloadStarted) {
@@ -93,12 +113,22 @@ fun MainScreen() {
         }
     }
 
-    // 夸克登录页：全屏覆盖（不含底部导航与折叠标题）
+    // 夸克登录页：全屏覆盖
     if (showQuarkLogin) {
         QuarkLoginScreen(
             viewModel = viewModel,
             onBack = { showQuarkLogin = false },
             onSaved = { showQuarkLogin = false }
+        )
+        return
+    }
+
+    // UC 登录页：全屏覆盖
+    if (showUCLogin) {
+        UCLoginScreen(
+            viewModel = ucViewModel,
+            onBack = { showUCLogin = false },
+            onSaved = { showUCLogin = false }
         )
         return
     }
@@ -155,8 +185,11 @@ fun MainScreen() {
                     MainTab.Drive -> DriveScreen(
                         scrollBehavior = scrollBehavior,
                         quarkAccount = quarkAccount,
+                        ucAccount = ucAccount,
                         onQuarkLogin = { showQuarkLogin = true },
-                        onQuarkLogout = { viewModel.logout() }
+                        onQuarkLogout = { viewModel.logout() },
+                        onUCLogin = { showUCLogin = true },
+                        onUCLogout = { ucViewModel.logout() }
                     )
                     MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
                     MainTab.Settings -> SettingsScreen(

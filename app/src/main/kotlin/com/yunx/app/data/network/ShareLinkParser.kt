@@ -1,33 +1,43 @@
 package com.yunx.app.data.network
 
+/** 网盘平台 */
+enum class SharePlatform { QUARK, UC }
+
 /**
- * 解析结果：share_id + 提取码。
+ * 解析结果：share_id + 提取码 + 平台。
  */
 data class ParsedShare(
     val shareId: String,
-    val pwd: String?
+    val pwd: String?,
+    val platform: SharePlatform
 )
 
 /**
  * 从分享链接或整段分享文案中提取 share_id 与提取码。
- *
- * 支持格式：
- * - https://pan.quark.cn/s/01defac105e1（提取码：3vfy）
- * - https://pan.quark.cn/s/6fac71a11e58?pwd=xqvq
- * - 整段复制文案（自动提取链接与「提取码：xxxx」）
+ * 支持：pan.quark.cn/s/xxx（夸克）、drive.uc.cn/s/xxx（UC）
  */
 object ShareLinkParser {
 
     private val urlRegex = Regex("""https?://[^\s]+""")
-    private val shareIdRegex = Regex("""/s/([A-Za-z0-9]+)""")
+    private val quarkShareIdRegex = Regex("""pan\.quark\.cn/s/([A-Za-z0-9]+)""")
+    private val ucShareIdRegex = Regex("""drive\.uc\.cn/s/([A-Za-z0-9]+)""")
     private val pwdInUrlRegex = Regex("""[?&]pwd=([A-Za-z0-9]+)""")
     private val pwdInTextRegex = Regex("""提取码[：:]\s*([A-Za-z0-9]{4})""")
 
     fun parse(text: String): ParsedShare? {
         val url = urlRegex.find(text.trim())?.value ?: return null
-        val shareId = shareIdRegex.find(url)?.groupValues?.getOrNull(1) ?: return null
-        val pwd = pwdInUrlRegex.find(url)?.groupValues?.getOrNull(1)
-            ?: pwdInTextRegex.find(text)?.groupValues?.getOrNull(1)
-        return ParsedShare(shareId = shareId, pwd = pwd)
+        // 夸克链接
+        quarkShareIdRegex.find(url)?.groupValues?.getOrNull(1)?.let { sid ->
+            val pwd = pwdInUrlRegex.find(url)?.groupValues?.getOrNull(1)
+                ?: pwdInTextRegex.find(text)?.groupValues?.getOrNull(1)
+            return ParsedShare(shareId = sid, pwd = pwd, platform = SharePlatform.QUARK)
+        }
+        // UC 链接
+        ucShareIdRegex.find(url)?.groupValues?.getOrNull(1)?.let { sid ->
+            val pwd = pwdInUrlRegex.find(url)?.groupValues?.getOrNull(1)
+                ?: pwdInTextRegex.find(text)?.groupValues?.getOrNull(1)
+            return ParsedShare(shareId = sid, pwd = pwd, platform = SharePlatform.UC)
+        }
+        return null
     }
 }

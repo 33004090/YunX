@@ -34,6 +34,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.db.QuarkAccountEntity
+import com.yunx.app.data.db.UCAccountEntity
 
 /**
  * 网盘账号展示模型。
@@ -57,11 +58,15 @@ private data class DriveAccount(
 fun DriveScreen(
     scrollBehavior: TopAppBarScrollBehavior,
     quarkAccount: QuarkAccountEntity?,
+    ucAccount: UCAccountEntity?,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
+    onUCLogin: () -> Unit,
+    onUCLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showQuarkSheet by remember { mutableStateOf(false) }
+    var showUCSheet by remember { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
@@ -71,10 +76,16 @@ fun DriveScreen(
         avatarText = "夸",
         isLoggedIn = quarkAccount != null
     )
+    val uc = DriveAccount(
+        id = "uc",
+        name = "UC网盘",
+        description = ucAccount?.nickname ?: "点击登录，支持解析下载",
+        avatarText = "UC",
+        isLoggedIn = ucAccount != null
+    )
     val others = remember {
         listOf(
-            DriveAccount(id = "xunlei", name = "迅雷网盘", description = "迅雷云盘高速下载", avatarText = "迅"),
-            DriveAccount(id = "uc", name = "UC网盘", description = "UC 网盘存储服务", avatarText = "UC")
+            DriveAccount(id = "xunlei", name = "迅雷网盘", description = "迅雷云盘高速下载", avatarText = "迅")
         )
     }
 
@@ -103,6 +114,16 @@ fun DriveScreen(
                 }
             )
         }
+        item(key = uc.id) {
+            DriveAccountCard(
+                account = uc,
+                onClick = if (uc.isLoggedIn) {
+                    { showUCSheet = true }
+                } else {
+                    onUCLogin
+                }
+            )
+        }
         items(others, key = { it.id }) { account ->
             DriveAccountCard(account = account)
         }
@@ -117,6 +138,18 @@ fun DriveScreen(
                 showQuarkSheet = false
             },
             onDismiss = { showQuarkSheet = false }
+        )
+    }
+
+    // 已登录 UC：点击卡片弹出账号信息底部弹窗
+    if (showUCSheet && ucAccount != null) {
+        UCAccountSheet(
+            account = ucAccount,
+            onLogout = {
+                onUCLogout()
+                showUCSheet = false
+            },
+            onDismiss = { showUCSheet = false }
         )
     }
 }

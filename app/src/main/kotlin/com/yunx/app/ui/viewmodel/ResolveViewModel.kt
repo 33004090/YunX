@@ -8,11 +8,17 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.QuarkConstants
+import com.yunx.app.data.network.ShareLinkParser
+import com.yunx.app.data.network.SharePlatform
+import com.yunx.app.data.network.UCConstants
 import com.yunx.app.data.network.model.DownloadLink
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareSession
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
+import com.yunx.app.data.repository.ShareResolveRepository
+import com.yunx.app.data.repository.UCAccountRepository
+import com.yunx.app.data.repository.UCResolveRepository
 import kotlinx.coroutines.launch
 
 sealed interface ResolveUiState {
@@ -28,6 +34,8 @@ sealed interface ResolveUiState {
 class ResolveViewModel(
     private val accountRepository: QuarkAccountRepository,
     private val resolveRepository: QuarkResolveRepository,
+    private val ucAccountRepository: UCAccountRepository,
+    private val ucResolveRepository: UCResolveRepository,
     private val downloadManager: DownloadManager
 ) : ViewModel() {
 
@@ -60,22 +68,41 @@ class ResolveViewModel(
     var pathNames by mutableStateOf<List<String>>(emptyList())
         private set
 
+    /** 当前解析平台（QUARK / UC），由链接自动检测 */
+    private var currentPlatform: SharePlatform = SharePlatform.QUARK
+
     /** 开始解析：链接 → token →（密码）→ 根目录列表 */
     fun startResolve(link: String, pwd: String?) {
         viewModelScope.launch {
             uiState = ResolveUiState.Loading
-            val cookie = accountRepository.getAccount()?.cookie
-            if (cookie.isNullOrBlank()) {
-                uiState = ResolveUiState.Error("请先在「网盘」页登录夸克网盘")
+            // 检测平台
+            val parsed = ShareLinkParser.parse(link)
+            if (parsed == null) {
+                uiState = ResolveUiState.Error("无法识别分享链接")
                 return@launch
             }
-            resolveRepository.createSession(link, pwd, cookie)
+            currentPlatform = parsed.platform
+            val isUC = parsed.platform == SharePlatform.UC
+            val cookie = if (isUC) {
+                ucAccountRepository.getAccount()?.cookie
+            } else {
+                accountRepository.getAccount()?.cookie
+            }
+            if (cookie.isNullOrBlank()) {
+                uiState = ResolveUiState.Error(
+                    if (isUC) "请先在「网盘」页登录 UC 网盘"
+                    else "请先在「网盘」页登录夸克网盘"
+                )
+                return@launch
+            }
+            val repo: ShareResolveRepository = if (isUC) ucResolveRepository else resolveRepository
+            repo.createSession(link, pwd, cookie)
                 .onSuccess { s ->
                     session = s
-                    currentDirFid = QuarkConstants.DEFAULT_PDIR_FID
+                    currentDirFid = if (isUC) UCConstants.DEFAULT_PDIR_FID else QuarkConstants.DEFAULT_PDIR_FID
                     dirStack.clear()
                     pathNames = emptyList()
-                    loadFiles(s, currentDirFid, cookie)
+                    loadFiles(s, currentDirFid, cookie, repo)
                 }
                 .onFailure { e ->
                     uiState = ResolveUiState.Error(e.message ?: "解析失败")
@@ -91,12 +118,15 @@ class ResolveViewModel(
         currentDirFid = file.fid
         viewModelScope.launch {
             uiState = ResolveUiState.Loading
-            val cookie = accountRepository.getAccount()?.cookie
+            val isUC = currentPlatform == SharePlatform.UC
+            val cookie = if (isUC) ucAccountRepository.getAccount()?.cookie
+            else accountRepository.getAccount()?.cookie
             if (cookie.isNullOrBlank()) {
                 uiState = ResolveUiState.Error("登录已失效，请重新登录")
                 return@launch
             }
-            loadFiles(s, file.fid, cookie)
+            val repo: ShareResolveRepository = if (isUC) ucResolveRepository else resolveRepository
+            loadFiles(s, file.fid, cookie, repo)
         }
     }
 
@@ -108,8 +138,12 @@ class ResolveViewModel(
         pathNames = pathNames.dropLast(1)
         viewModelScope.launch {
             uiState = ResolveUiState.Loading
-            val cookie = accountRepository.getAccount()?.cookie ?: return@launch
-            loadFiles(s, currentDirFid, cookie)
+            val isUC = currentPlatform == SharePlatform.UC
+            val cookie = if (isUC) ucAccountRepository.getAccount()?.cookie
+            else accountRepository.getAccount()?.cookie
+            if (cookie.isNullOrBlank()) return@launch
+            val repo: ShareResolveRepository = if (isUC) ucResolveRepository else resolveRepository
+            loadFiles(s, currentDirFid, cookie, repo)
         }
     }
 
@@ -140,21 +174,24 @@ class ResolveViewModel(
                 downloadError = "请先解析分享"
                 return@launch
             }
-            val cookie = accountRepository.getAccount()?.cookie
+            val isUC = currentPlatform == SharePlatform.UC
+            val cookie = if (isUC) ucAccountRepository.getAccount()?.cookie
+            else accountRepository.getAccount()?.cookie
             if (cookie.isNullOrBlank()) {
                 downloadError = "登录已失效，请重新登录"
                 return@launch
             }
-            // 1. 确保「YunX临时转存」目录存在
-            resolveRepository.ensureTempDir(cookie)
+            val repo: ShareResolveRepository = if (isUC) ucResolveRepository else resolveRepository
+            // 1. 确保临时目录存在
+            repo.ensureTempDir(cookie)
                 .onFailure { downloadError = it.message ?: "转存失败" }
                 .onSuccess { dirFid ->
                     // 2. 转存文件到临时目录（返回转存后的新 fid）
-                    resolveRepository.transferFile(s, file, dirFid, cookie)
+                    repo.transferFile(s, file, dirFid, cookie)
                         .onFailure { downloadError = it.message ?: "转存失败" }
                         .onSuccess { savedFid ->
                             // 3. 用转存后的新 fid 获取下载直链
-                            resolveRepository.getDownloadLink(savedFid, cookie)
+                            repo.getDownloadLink(savedFid, cookie)
                                 .onSuccess { downloadLink = it }
                                 .onFailure { downloadError = it.message ?: "获取下载链接失败" }
                         }
@@ -166,28 +203,36 @@ class ResolveViewModel(
         downloadLink = null
     }
 
-    /** 将直链加入下载队列（分片多线程下载，携带 Cookie 与 QuarkPC UA） */
+    /** 将直链加入下载队列（分片多线程下载，携带 Cookie 与 UA） */
     fun startDownload(link: DownloadLink) {
         viewModelScope.launch {
-            val cookie = accountRepository.getAccount()?.cookie
+            val isUC = currentPlatform == SharePlatform.UC
+            val cookie = if (isUC) ucAccountRepository.getAccount()?.cookie
+            else accountRepository.getAccount()?.cookie
             if (cookie.isNullOrBlank()) {
-                downloadError = "请先登录夸克网盘"
+                downloadError = "请先登录网盘"
                 return@launch
             }
+            val ua = if (isUC) UCConstants.USER_AGENT else QuarkConstants.API_USER_AGENT
             downloadManager.enqueue(
                 url = link.downloadUrl,
                 fileName = link.filename,
                 headers = mapOf(
                     "Cookie" to cookie,
-                    "User-Agent" to QuarkConstants.API_USER_AGENT
+                    "User-Agent" to ua
                 )
             )
             downloadStarted = true
         }
     }
 
-    private suspend fun loadFiles(s: ShareSession, dirFid: String, cookie: String) {
-        resolveRepository.listFiles(s, dirFid, cookie)
+    private suspend fun loadFiles(
+        s: ShareSession,
+        dirFid: String,
+        cookie: String,
+        repo: ShareResolveRepository
+    ) {
+        repo.listFiles(s, dirFid, cookie)
             .onSuccess { files ->
                 uiState = ResolveUiState.Detail(s, files)
             }
@@ -199,12 +244,14 @@ class ResolveViewModel(
     class Factory(
         private val accountRepository: QuarkAccountRepository,
         private val resolveRepository: QuarkResolveRepository,
+        private val ucAccountRepository: UCAccountRepository,
+        private val ucResolveRepository: UCResolveRepository,
         private val downloadManager: DownloadManager
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             require(modelClass.isAssignableFrom(ResolveViewModel::class.java))
-            return ResolveViewModel(accountRepository, resolveRepository, downloadManager) as T
+            return ResolveViewModel(accountRepository, resolveRepository, ucAccountRepository, ucResolveRepository, downloadManager) as T
         }
     }
 }
