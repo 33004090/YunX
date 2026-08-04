@@ -10,6 +10,7 @@ object QuarkConstants {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
     "Chrome/130.0.0.0 Safari/537.36 QuarkPC/6.0.8.649"
 
+
     /** WebView 登录页（PC 环境） */
     const val LOGIN_URL = "https://pan.quark.cn/?fr=pc&platform=pc"
 
@@ -19,10 +20,14 @@ object QuarkConstants {
     /** 验证登录状态的接口 */
     const val ACCOUNT_INFO_URL = "https://pan.quark.cn/account/info"
 
-    /** 解析/下载 API 强制 User-Agent（kkdo.md） */
+    /** 解析/下载 API 强制 User-Agent（kkdo.md） 
     const val API_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
             "Chrome/130.0.0.0 Safari/537.36 QuarkPC/6.0.8.649"
+            */
+            const val API_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+    "quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.12-a038f7b798 Safari/537.36 Channel/pckk_other_ch"
 
     /** 业务 API 基础域名 */
     const val API_BASE = "https://drive-pc.quark.cn"

@@ -9,6 +9,7 @@ import com.yunx.app.data.network.model.ShareSession
 
 /**
  * 分享解析仓库：token → 列表 → 转存临时目录 → 下载直链。
+ * 所有 API 失败统一携带服务端 message（QuarkApiException）透传给 UI。
  */
 class QuarkResolveRepository(private val api: QuarkApi) {
 
@@ -19,34 +20,39 @@ class QuarkResolveRepository(private val api: QuarkApi) {
         val parsed = ShareLinkParser.parse(link)
             ?: return Result.failure(IllegalArgumentException("无法识别分享链接"))
         val effectivePwd = pwd?.takeIf { it.isNotBlank() } ?: parsed.pwd
-        val token = api.getShareToken(parsed.shareId, effectivePwd, cookie)
-            ?: return Result.failure(IllegalArgumentException("分享不存在、已失效或提取码错误"))
-        return Result.success(ShareSession(parsed.shareId, token.stoken, token.title))
+        return runCatching {
+            val token = api.getShareToken(parsed.shareId, effectivePwd, cookie)
+                ?: throw IllegalStateException("未获取到分享凭证")
+            ShareSession(parsed.shareId, token.stoken, token.title)
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(it) }
+        )
     }
 
     /** 获取指定目录下的文件列表 */
-    suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> {
-        val files = api.getShareFiles(session.shareId, session.stoken, dirFid, cookie)
-        return if (files != null) {
-            Result.success(files)
-        } else {
-            Result.failure(IllegalArgumentException("获取文件列表失败，请重试"))
-        }
-    }
+    suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
+        runCatching {
+            api.getShareFiles(session.shareId, session.stoken, dirFid, cookie)
+                ?: throw IllegalStateException("未获取到文件列表")
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(it) }
+        )
 
     /**
      * 确保「YunX临时转存」目录存在，返回其 fid；不存在则创建。
      */
-    suspend fun ensureTempDir(cookie: String): Result<String> {
+    suspend fun ensureTempDir(cookie: String): Result<String> = runCatching {
         val rootFiles = api.getFileList(QuarkConstants.DEFAULT_PDIR_FID, cookie)
-            ?: return Result.failure(IllegalArgumentException("获取网盘目录失败，请重试"))
-        rootFiles.firstOrNull { it.isdir && it.fname == QuarkConstants.TEMP_DIR_NAME }?.let {
-            return Result.success(it.fid)
-        }
-        val fid = api.createFolder(QuarkConstants.TEMP_DIR_NAME, QuarkConstants.DEFAULT_PDIR_FID, cookie)
-            ?: return Result.failure(IllegalArgumentException("创建临时目录失败，请重试"))
-        return Result.success(fid)
-    }
+            ?: throw IllegalStateException("获取网盘目录失败")
+        rootFiles.firstOrNull { it.isdir && it.fname == QuarkConstants.TEMP_DIR_NAME }?.fid
+            ?: api.createFolder(QuarkConstants.TEMP_DIR_NAME, QuarkConstants.DEFAULT_PDIR_FID, cookie)
+            ?: throw IllegalStateException("创建临时目录失败")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
 
     /**
      * 转存分享文件到临时目录，等待异步任务完成。
@@ -57,7 +63,7 @@ class QuarkResolveRepository(private val api: QuarkApi) {
         file: ShareFile,
         toDirFid: String,
         cookie: String
-    ): Result<String> {
+    ): Result<String> = runCatching {
         val taskId = api.saveShareFile(
             shareId = session.shareId,
             stoken = session.stoken,
@@ -66,19 +72,20 @@ class QuarkResolveRepository(private val api: QuarkApi) {
             fidToken = file.fidToken,
             toPdirFid = toDirFid,
             cookie = cookie
-        ) ?: return Result.failure(IllegalArgumentException("转存失败，请重试"))
-        val savedFid = api.pollTask(taskId, cookie)
-            ?: return Result.failure(IllegalArgumentException("转存超时，请稍后重试"))
-        return Result.success(savedFid)
-    }
+        ) ?: throw IllegalStateException("转存失败")
+        api.pollTask(taskId, cookie)
+            ?: throw IllegalStateException("转存超时，请稍后重试")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
 
     /** 获取文件下载直链（转存后调用） */
-    suspend fun getDownloadLink(fid: String, cookie: String): Result<DownloadLink> {
-        val link = api.getDownloadLink(fid, cookie)
-        return if (link != null) {
-            Result.success(link)
-        } else {
-            Result.failure(IllegalArgumentException("获取下载链接失败，请重试"))
-        }
-    }
+    suspend fun getDownloadLink(fid: String, cookie: String): Result<DownloadLink> = runCatching {
+        api.getDownloadLink(fid, cookie)
+            ?: throw IllegalStateException("获取下载链接失败")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
 }

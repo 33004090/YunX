@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -69,6 +70,8 @@ fun QuarkAccountSheet(
 ) {
     val context = LocalContext.current
     var showFullCookie by rememberSaveable { mutableStateOf(false) }
+    // 退出登录二次确认
+    var showLogoutConfirm by remember { mutableStateOf(false) }
 
     val cookiePreviewLimit = 200
     val cookieTruncated = account.cookie.length > cookiePreviewLimit
@@ -229,7 +232,7 @@ fun QuarkAccountSheet(
 
             // 退出登录
             Button(
-                onClick = onLogout,
+                onClick = { showLogoutConfirm = true },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
@@ -247,6 +250,28 @@ fun QuarkAccountSheet(
                 Text("退出登录")
             }
         }
+    }
+
+    // 退出登录二次确认
+    if (showLogoutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirm = false },
+            title = { Text("退出登录") },
+            text = { Text("确定要退出当前夸克账号吗？退出后将清除本地 Cookie。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutConfirm = false
+                        onLogout()
+                    }
+                ) {
+                    Text("退出", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutConfirm = false }) { Text("取消") }
+            }
+        )
     }
 }
 

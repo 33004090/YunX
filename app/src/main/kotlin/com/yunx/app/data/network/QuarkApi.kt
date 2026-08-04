@@ -52,7 +52,7 @@ class QuarkApi(
         val request = Request.Builder()
             .url(QuarkConstants.ACCOUNT_INFO_URL)
             .header("Cookie", cookie)
-            .header("User-Agent", QuarkConstants.USER_AGENT)
+            .header("User-Agent", QuarkConstants.API_USER_AGENT)
             .get()
             .build()
         runCatching {
@@ -60,7 +60,8 @@ class QuarkApi(
                 if (!response.isSuccessful) return@use null
                 val body = response.body?.string() ?: return@use null
                 val json = JSONObject(body)
-                if (json.optInt("status") == 200) {
+                // 该接口无 status 字段，成功标志为 success:true / code:"OK"
+                if (json.optBoolean("success", false)) {
                     json.optJSONObject("data")
                         ?.optString("nickname")
                         ?.takeIf { it.isNotBlank() }
@@ -272,22 +273,25 @@ class QuarkApi(
     suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withContext(Dispatchers.IO) {
         val body = JSONObject().put("fids", JSONArray().put(fid)).toString()
         val request = postJson(QuarkConstants.DOWNLOAD_URL, cookie, body)
-        runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-                val json = JSONObject(response.body?.string() ?: return@use null)
-                if (json.optInt("status") != 200) return@use null
-                val array = json.optJSONArray("data") ?: return@use null
-                if (array.length() == 0) return@use null
-                val item = array.optJSONObject(0) ?: return@use null
-                DownloadLink(
-                    fid = item.optString("fid"),
-                    filename = item.optString("filename"),
-                    downloadUrl = item.optString("download_url"),
-                    size = item.optLong("size")
-                )
-            }
-        }.getOrNull()
+        val response = client.newCall(request).execute()
+        val bodyStr = response.use {
+            it.body?.string() ?: throw QuarkApiException("获取下载链接失败：响应为空")
+        }
+        val json = runCatching { JSONObject(bodyStr) }.getOrElse {
+            throw QuarkApiException("响应解析失败")
+        }
+        if (json.optInt("status") != 200) {
+            throw QuarkApiException(json.optString("message").ifBlank { "获取下载链接失败" })
+        }
+        val array = json.optJSONArray("data") ?: throw QuarkApiException("响应缺少 data")
+        if (array.length() == 0) throw QuarkApiException("未返回下载链接")
+        val item = array.optJSONObject(0) ?: throw QuarkApiException("未返回下载链接")
+        DownloadLink(
+            fid = item.optString("fid"),
+            filename = item.optString("filename"),
+            downloadUrl = item.optString("download_url"),
+            size = item.optLong("size")
+        )
     }
 
     // ---------- 请求构造与响应解析 ----------
@@ -309,17 +313,18 @@ class QuarkApi(
             .post(body.toRequestBody(jsonMediaType))
             .build()
 
-    private fun <T> parseData(request: Request, parser: (JSONObject) -> T): T? =
-        runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-                val body = response.body?.string() ?: return@use null
-                val json = JSONObject(body)
-                if (json.optInt("status") == 200) {
-                    parser(json.optJSONObject("data") ?: return@use null)
-                } else {
-                    null
-                }
-            }
-        }.getOrNull()
+    private fun <T> parseData(request: Request, parser: (JSONObject) -> T): T {
+        val response = client.newCall(request).execute()
+        val body = response.use {
+            it.body?.string() ?: throw QuarkApiException("请求失败：响应为空")
+        }
+        val json = runCatching { JSONObject(body) }.getOrElse {
+            throw QuarkApiException("响应解析失败")
+        }
+        if (json.optInt("status") != 200) {
+            // 透传服务端 message，如「提取码错误」「分享已失效」等
+            throw QuarkApiException(json.optString("message").ifBlank { "请求失败" })
+        }
+        return parser(json.optJSONObject("data") ?: throw QuarkApiException("响应缺少 data"))
+    }
 }
