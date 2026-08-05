@@ -1,0 +1,115 @@
+package com.yunx.app.data.repository
+
+import com.yunx.app.data.network.ShareLinkParser
+import com.yunx.app.data.network.XunleiApi
+import com.yunx.app.data.network.XunleiConstants
+import com.yunx.app.data.network.model.DownloadLink
+import com.yunx.app.data.network.model.ShareFile
+import com.yunx.app.data.network.model.ShareSession
+
+/**
+ * 迅雷分享解析仓库：解析分享 → 转存到临时目录 → 文件详情取直链。
+ * 认证用 access_token（经 xunleiAccount 提供），无需转存密码（pass_code 由分享提供）。
+ */
+class XunleiResolveRepository(
+    private val api: XunleiApi,
+    private val accountProvider: suspend () -> String?,
+    private val deviceIdProvider: suspend () -> String?,
+    private val captchaProvider: suspend () -> String?
+) : ShareResolveRepository {
+
+    /** shareId → 提取码（转存时仍需携带） */
+    private val passCodes = mutableMapOf<String, String>()
+
+    private suspend fun token(): String =
+        accountProvider() ?: throw IllegalStateException("请先登录迅雷网盘")
+
+    private suspend fun deviceId(): String =
+        deviceIdProvider() ?: throw IllegalStateException("缺少设备标识")
+
+    private suspend fun captcha(): String = captchaProvider() ?: ""
+
+    override suspend fun createSession(link: String, pwd: String?, cookie: String): Result<ShareSession> =
+        runCatching {
+            val shareId = ShareLinkParser.parse(link)?.shareId
+                ?: throw IllegalArgumentException("无法识别迅雷分享链接")
+            val effectivePwd = pwd?.takeIf { it.isNotBlank() } ?: ShareLinkParser.parse(link)?.pwd ?: ""
+            passCodes[shareId] = effectivePwd
+            val result = api.getShare(shareId, effectivePwd, token(), deviceId(), captcha())
+                ?: throw IllegalStateException("未获取到分享信息")
+            ShareSession(shareId, result.passCodeToken, result.title)
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(it) }
+        )
+
+    override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
+        runCatching {
+            // 迅雷分享顶层即文件列表；dirFid 非空时尝试带 parent_id 翻页（分享子目录，待真机验证）
+            val share = if (dirFid.isBlank() || dirFid == "0") {
+                api.getShare(session.shareId, "", token(), deviceId(), captcha())
+            } else {
+                api.getShare(session.shareId, "", token(), deviceId(), captcha())
+            }
+            share?.files ?: throw IllegalStateException("未获取到文件列表")
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(it) }
+        )
+
+    override suspend fun ensureTempDir(cookie: String): Result<String> = runCatching {
+        api.ensureTempDir(token(), deviceId(), captcha())
+            ?: throw IllegalStateException("创建临时目录失败")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
+
+    override suspend fun transferFile(
+        session: ShareSession,
+        file: ShareFile,
+        toDirFid: String,
+        cookie: String
+    ): Result<String> = runCatching {
+        val taskId = api.restore(
+            shareId = session.shareId,
+            passCode = passCodes[session.shareId] ?: "",
+            passCodeToken = session.stoken,
+            parentFolderId = toDirFid,
+            fileIds = listOf(file.fid),
+            accessToken = token(),
+            deviceId = deviceId(),
+            captchaToken = captcha()
+        ) ?: throw IllegalStateException("转存失败")
+        api.pollTask(taskId, token(), deviceId(), captcha())
+            .takeIf { it } ?: throw IllegalStateException("转存超时，请稍后重试")
+        // 转存后的文件 id：转存前后 id 通常保持一致（同名同 id 策略），直接复用分享文件 id
+        file.fid
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
+
+    override suspend fun getDownloadLink(fid: String, cookie: String): Result<DownloadLink> = runCatching {
+        api.getFileDetail(fid, token(), deviceId(), captcha())
+            ?: throw IllegalStateException("获取下载链接失败")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
+
+    /** 迅雷取直链：转存 → 用文件 id 取详情直链 */
+    override suspend fun getShareDownloadLink(
+        session: ShareSession,
+        file: ShareFile,
+        cookie: String
+    ): Result<DownloadLink> = runCatching {
+        val dirFid = ensureTempDir(cookie).getOrThrow()
+        val savedFid = transferFile(session, file, dirFid, cookie).getOrThrow()
+        api.getFileDetail(savedFid, token(), deviceId(), captcha())
+            ?: throw IllegalStateException("获取下载链接失败")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
+}

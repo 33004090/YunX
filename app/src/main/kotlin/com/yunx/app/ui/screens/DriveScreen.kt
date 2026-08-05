@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.db.QuarkAccountEntity
 import com.yunx.app.data.db.UCAccountEntity
+import com.yunx.app.data.db.XunleiAccountEntity
 
 /**
  * 网盘账号展示模型。
@@ -59,14 +60,18 @@ fun DriveScreen(
     scrollBehavior: TopAppBarScrollBehavior,
     quarkAccount: QuarkAccountEntity?,
     ucAccount: UCAccountEntity?,
+    xunleiAccount: XunleiAccountEntity?,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
     onUCLogin: () -> Unit,
     onUCLogout: () -> Unit,
+    onXunleiLogin: () -> Unit,
+    onXunleiLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showQuarkSheet by remember { mutableStateOf(false) }
     var showUCSheet by remember { mutableStateOf(false) }
+    var showXunleiSheet by remember { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
@@ -83,10 +88,15 @@ fun DriveScreen(
         avatarText = "UC",
         isLoggedIn = ucAccount != null
     )
+    val xunlei = DriveAccount(
+        id = "xunlei",
+        name = "迅雷网盘",
+        description = xunleiAccount?.nickname ?: "点击登录，支持解析下载",
+        avatarText = "迅",
+        isLoggedIn = xunleiAccount != null
+    )
     val others = remember {
-        listOf(
-            DriveAccount(id = "xunlei", name = "迅雷网盘", description = "迅雷云盘高速下载", avatarText = "迅")
-        )
+        emptyList<DriveAccount>()
     }
 
     LazyColumn(
@@ -124,6 +134,16 @@ fun DriveScreen(
                 }
             )
         }
+        item(key = xunlei.id) {
+            DriveAccountCard(
+                account = xunlei,
+                onClick = if (xunlei.isLoggedIn) {
+                    { showXunleiSheet = true }
+                } else {
+                    onXunleiLogin
+                }
+            )
+        }
         items(others, key = { it.id }) { account ->
             DriveAccountCard(account = account)
         }
@@ -150,6 +170,18 @@ fun DriveScreen(
                 showUCSheet = false
             },
             onDismiss = { showUCSheet = false }
+        )
+    }
+
+    // 已登录迅雷：点击卡片弹出账号信息底部弹窗
+    if (showXunleiSheet && xunleiAccount != null) {
+        XunleiAccountSheet(
+            account = xunleiAccount,
+            onLogout = {
+                onXunleiLogout()
+                showXunleiSheet = false
+            },
+            onDismiss = { showXunleiSheet = false }
         )
     }
 }

@@ -1,0 +1,154 @@
+package com.yunx.app.ui.login
+
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import com.yunx.app.ui.viewmodel.XunleiAccountViewModel
+
+/**
+ * 迅雷网盘登录页：账号+密码登录，触发风控时切换短信验证码流程。
+ * 步骤：账号密码 →（需要时）发送短信 → 输入验证码 → 完成。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun XunleiLoginScreen(
+    viewModel: XunleiAccountViewModel,
+    onBack: () -> Unit,
+    onSaved: () -> Unit
+) {
+    val context = LocalContext.current
+    val step = viewModel.loginStep
+    val error = viewModel.loginError
+
+    var username by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var smsCode by rememberSaveable { mutableStateOf("") }
+    var isSending by remember { mutableStateOf(false) }
+
+    // 登录错误 Toast
+    LaunchedEffect(error) {
+        error?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.consumeLoginError()
+        }
+    }
+    // 短信登录成功后关闭
+    LaunchedEffect(viewModel.xunleiAccount.value) {
+        if (step == null && viewModel.xunleiAccount.value != null) onSaved()
+    }
+
+    BackHandler { onBack() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("迅雷网盘登录", style = MaterialTheme.typography.titleLarge) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = if (step?.needSms == true) "短信验证" else "登录迅雷网盘",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+            )
+            Text(
+                text = if (step?.needSms == true) {
+                    "账号密码登录触发安全验证，已向 ${username} 发送短信验证码"
+                } else {
+                    "使用迅雷账号登录，支持解析与下载分享文件"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (step == null || !step.needSms) {
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("手机号 / 邮箱") },
+                    leadingIcon = { Icon(Icons.Outlined.Phone, contentDescription = null) },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.large
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("密码") },
+                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.large
+                )
+                Button(
+                    onClick = { viewModel.login(username, password) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    enabled = username.isNotBlank() && password.isNotBlank() && !isSending
+                ) { Text("登录") }
+            } else {
+                OutlinedTextField(
+                    value = smsCode,
+                    onValueChange = { smsCode = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("短信验证码") },
+                    leadingIcon = { Icon(Icons.Outlined.Shield, contentDescription = null) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.large
+                )
+                Button(
+                    onClick = {
+                        isSending = true
+                        viewModel.loginWithSms(
+                            username, smsCode,
+                            step.smsCreditKey, step.smsToken
+                        )
+                        isSending = false
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    enabled = smsCode.isNotBlank()
+                ) { Text("验证并登录") }
+                TextButton(
+                    onClick = {
+                        viewModel.sendSms(username)
+                        Toast.makeText(context, "验证码已发送", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) { Text("重新发送验证码") }
+            }
+        }
+    }
+}

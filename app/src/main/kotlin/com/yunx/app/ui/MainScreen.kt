@@ -31,13 +31,17 @@ import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.QuarkApi
 import com.yunx.app.data.network.UCApi
+import com.yunx.app.data.network.XunleiApi
 import com.yunx.app.data.prefs.SettingsRepository
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
 import com.yunx.app.data.repository.UCAccountRepository
 import com.yunx.app.data.repository.UCResolveRepository
+import com.yunx.app.data.repository.XunleiAccountRepository
+import com.yunx.app.data.repository.XunleiResolveRepository
 import com.yunx.app.ui.login.QuarkLoginScreen
 import com.yunx.app.ui.login.UCLoginScreen
+import com.yunx.app.ui.login.XunleiLoginScreen
 import com.yunx.app.ui.navigation.MainTab
 import com.yunx.app.ui.screens.DownloadScreen
 import com.yunx.app.ui.screens.DriveScreen
@@ -47,6 +51,7 @@ import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
 import com.yunx.app.ui.viewmodel.UCAccountViewModel
+import com.yunx.app.ui.viewmodel.XunleiAccountViewModel
 import okhttp3.OkHttpClient
 
 /**
@@ -62,11 +67,13 @@ fun MainScreen() {
     var currentTab by rememberSaveable { mutableStateOf(MainTab.Resolve) }
     var showQuarkLogin by rememberSaveable { mutableStateOf(false) }
     var showUCLogin by rememberSaveable { mutableStateOf(false) }
+    var showXunleiLogin by rememberSaveable { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
     val api = remember { QuarkApi() }
     val ucApi = remember { UCApi() }
+    val xunleiApi = remember { XunleiApi() }
     val db = remember { AppDatabase.get(context) }
     val settings = remember { SettingsRepository(context) }
     val repository = remember {
@@ -74,6 +81,9 @@ fun MainScreen() {
     }
     val ucRepository = remember {
         UCAccountRepository(db.ucAccountDao(), ucApi)
+    }
+    val xunleiRepository = remember {
+        XunleiAccountRepository(db.xunleiAccountDao(), xunleiApi)
     }
     // 下载管理器：OkHttp 分片下载器 + Room 任务持久化 + 可配置线程数（设置页动态生效）
     val downloadManager = remember {
@@ -90,12 +100,25 @@ fun MainScreen() {
     val ucViewModel: UCAccountViewModel = viewModel(
         factory = UCAccountViewModel.Factory(ucRepository)
     )
+    val xunleiViewModel: XunleiAccountViewModel = viewModel(
+        factory = XunleiAccountViewModel.Factory(xunleiRepository)
+    )
+    val xunleiResolveRepository = remember {
+        XunleiResolveRepository(
+            api = xunleiApi,
+            accountProvider = { xunleiRepository.getAccount()?.accessToken },
+            deviceIdProvider = { xunleiRepository.getAccount()?.deviceId },
+            captchaProvider = { xunleiRepository.getAccount()?.captchaToken }
+        )
+    }
     val resolveViewModel: ResolveViewModel = viewModel(
         factory = ResolveViewModel.Factory(
             repository,
             QuarkResolveRepository(api),
             ucRepository,
             UCResolveRepository(ucApi),
+            xunleiRepository,
+            xunleiResolveRepository,
             downloadManager
         )
     )
@@ -104,6 +127,7 @@ fun MainScreen() {
     )
     val quarkAccount by viewModel.quarkAccount.collectAsState()
     val ucAccount by ucViewModel.ucAccount.collectAsState()
+    val xunleiAccount by xunleiViewModel.xunleiAccount.collectAsState()
 
     // 解析页发起下载后，自动切换到「下载」Tab
     LaunchedEffect(resolveViewModel.downloadStarted) {
@@ -129,6 +153,16 @@ fun MainScreen() {
             viewModel = ucViewModel,
             onBack = { showUCLogin = false },
             onSaved = { showUCLogin = false }
+        )
+        return
+    }
+
+    // 迅雷登录页：全屏覆盖（账号+密码，可能触发短信验证）
+    if (showXunleiLogin) {
+        XunleiLoginScreen(
+            viewModel = xunleiViewModel,
+            onBack = { showXunleiLogin = false },
+            onSaved = { showXunleiLogin = false }
         )
         return
     }
@@ -186,10 +220,13 @@ fun MainScreen() {
                         scrollBehavior = scrollBehavior,
                         quarkAccount = quarkAccount,
                         ucAccount = ucAccount,
+                        xunleiAccount = xunleiAccount,
                         onQuarkLogin = { showQuarkLogin = true },
                         onQuarkLogout = { viewModel.logout() },
                         onUCLogin = { showUCLogin = true },
-                        onUCLogout = { ucViewModel.logout() }
+                        onUCLogout = { ucViewModel.logout() },
+                        onXunleiLogin = { showXunleiLogin = true },
+                        onXunleiLogout = { xunleiViewModel.logout() }
                     )
                     MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
                     MainTab.Settings -> SettingsScreen(
