@@ -266,7 +266,6 @@ class QuarkApi(
         }
         null
     }
-
     // ---------- 下载直链 ----------
 
     /** 6.1 获取下载直链 */
@@ -292,6 +291,19 @@ class QuarkApi(
             downloadUrl = item.optString("download_url"),
             size = item.optLong("size")
         )
+    }
+
+    /** 6.2 删除文件（取链成功后清理临时转存；对齐抓包：action_type=2 + filelist + exclude_fids）
+     *  返回异步 task_id（删除为异步任务，无需轮询；失败返回 null）。
+     */
+    suspend fun deleteFile(fid: String, cookie: String): String? = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("action_type", 2)
+            .put("filelist", JSONArray().put(fid))
+            .put("exclude_fids", JSONArray())
+            .toString()
+        val request = postJson(QuarkConstants.DELETE_URL, cookie, body)
+        parseData(request) { data -> data.optString("task_id").takeIf { it.isNotBlank() } }
     }
 
     // ---------- 请求构造与响应解析 ----------

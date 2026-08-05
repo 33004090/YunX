@@ -56,6 +56,9 @@ object QuarkConstants {
     /** 异步任务查询 */
     const val TASK_URL = "$API_BASE/1/clouddrive/task?pr=ucpro&fr=pc"
 
+    /** 删除文件（取链成功后清理临时转存；body: action_type=2 + filelist） */
+    const val DELETE_URL = "$API_BASE/1/clouddrive/file/delete?pr=ucpro&fr=pc&uc_param_str="
+
     /** 临时转存目录名 */
     const val TEMP_DIR_NAME = "YunX临时转存"
 

@@ -89,7 +89,7 @@ class QuarkResolveRepository(private val api: QuarkApi) : ShareResolveRepository
         onFailure = { Result.failure(it) }
     )
 
-    /** 夸克取直链：转存到临时目录 → 用转存后新 fid 取直链 */
+    /** 夸克取直链：转存到临时目录 → 用转存后新 fid 取直链 → 取链成功后立即删除临时转存 */
     override suspend fun getShareDownloadLink(
         session: ShareSession,
         file: ShareFile,
@@ -97,8 +97,11 @@ class QuarkResolveRepository(private val api: QuarkApi) : ShareResolveRepository
     ): Result<DownloadLink> = runCatching {
         val dirFid = ensureTempDir(cookie).getOrThrow()
         val savedFid = transferFile(session, file, dirFid, cookie).getOrThrow()
-        api.getDownloadLink(savedFid, cookie)
+        val link = api.getDownloadLink(savedFid, cookie)
             ?: throw IllegalStateException("获取下载链接失败")
+        // 取链成功后立即删除临时转存文件（失败不阻断下载；目录保留，下次复用）
+        runCatching { api.deleteFile(savedFid, cookie) }
+        link
     }.fold(
         onSuccess = { Result.success(it) },
         onFailure = { Result.failure(it) }
