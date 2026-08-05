@@ -420,6 +420,22 @@ class XunleiApi(
         }
     }
 
+    /** 批量删除文件（转存后的临时文件；直链已自带签名，删除不影响下载） */
+    suspend fun batchDelete(
+        ids: List<String>,
+        accessToken: String,
+        deviceId: String,
+        captchaToken: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("ids", JSONArray().apply { ids.forEach { put(it) } })
+            .put("space", "")
+            .toString()
+        panCall(captchaToken, deviceId, "POST:/drive/v1/files:batchDelete", { t ->
+            panRequest("${XunleiConstants.FILES_URL}:batchDelete", accessToken, deviceId, t, body)
+        }) { true }
+    }
+
     /** 轮询转存任务（最多 15 次 × 1s） */
     suspend fun pollTask(taskId: String, accessToken: String, deviceId: String, captchaToken: String): Boolean =
         withContext(Dispatchers.IO) {

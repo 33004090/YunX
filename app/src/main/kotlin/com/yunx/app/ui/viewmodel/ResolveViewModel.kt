@@ -52,6 +52,10 @@ class ResolveViewModel(
         private set
 
     var downloadError by mutableStateOf<String?>(null)
+    private set
+
+    /** 获取下载直链中（UI 显示加载弹窗） */
+    var isFetchingDownloadLink by mutableStateOf(false)
         private set
 
     /** 下载已入队事件：触发后由 UI 切换到下载页 */
@@ -185,19 +189,24 @@ class ResolveViewModel(
         viewModelScope.launch {
             downloadLink = null
             downloadError = null
-            val s = session
-            if (s == null) {
-                downloadError = "请先解析分享"
-                return@launch
+            isFetchingDownloadLink = true
+            try {
+                val s = session
+                if (s == null) {
+                    downloadError = "请先解析分享"
+                    return@launch
+                }
+                val credential = currentCredential()
+                if (credential.isNullOrBlank()) {
+                    downloadError = "登录已失效，请重新登录"
+                    return@launch
+                }
+                currentRepo().getShareDownloadLink(s, file, credential)
+                    .onSuccess { downloadLink = it }
+                    .onFailure { downloadError = it.message ?: "获取下载链接失败" }
+            } finally {
+                isFetchingDownloadLink = false
             }
-            val credential = currentCredential()
-            if (credential.isNullOrBlank()) {
-                downloadError = "登录已失效，请重新登录"
-                return@launch
-            }
-            currentRepo().getShareDownloadLink(s, file, credential)
-                .onSuccess { downloadLink = it }
-                .onFailure { downloadError = it.message ?: "获取下载链接失败" }
         }
     }
 

@@ -22,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -109,6 +110,28 @@ fun ResolveScreen(
                 onClearPwd = { pwd = "" }
             )
         }
+    }
+
+    // 获取下载直链加载弹窗（转存/取链需要时间，避免无反馈）
+    if (viewModel.isFetchingDownloadLink) {
+        AlertDialog(
+            onDismissRequest = { },
+            confirmButton = { },
+            title = { Text("获取下载链接") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "正在获取下载链接，请稍候…",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        )
     }
 
     // 下载直链弹窗

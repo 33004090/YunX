@@ -104,7 +104,7 @@ class XunleiResolveRepository(
         onFailure = { Result.failure(it) }
     )
 
-    /** 迅雷取直链：转存 → 用文件 id 取详情直链 */
+    /** 迅雷取直链：转存 → 取详情直链 → 删除临时转存文件（直链自带签名，删除不影响下载） */
     override suspend fun getShareDownloadLink(
         session: ShareSession,
         file: ShareFile,
@@ -112,8 +112,11 @@ class XunleiResolveRepository(
     ): Result<DownloadLink> = runCatching {
         val dirFid = ensureTempDir(cookie).getOrThrow()
         val savedFid = transferFile(session, file, dirFid, cookie).getOrThrow()
-        api.getFileDetail(savedFid, access(), deviceId(), captcha())
+        val link = api.getFileDetail(savedFid, access(), deviceId(), captcha())
             ?: throw IllegalStateException("获取下载链接失败")
+        // 拿到直链后立即删除临时转存的文件（对齐官方 batchDelete；失败不阻断下载）
+        runCatching { api.batchDelete(listOf(savedFid), access(), deviceId(), captcha()) }
+        link
     }.fold(
         onSuccess = { Result.success(it) },
         onFailure = { Result.failure(it) }
