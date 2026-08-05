@@ -1,5 +1,7 @@
 package com.yunx.app.ui.login
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
@@ -36,6 +38,8 @@ fun XunleiLoginScreen(
     val context = LocalContext.current
     val step = viewModel.loginStep
     val error = viewModel.loginError
+    // collectAsState 订阅账号：登录成功后 account 变非空，必触发重组 → 自动关闭登录页
+    val account by viewModel.xunleiAccount.collectAsState()
 
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -50,8 +54,8 @@ fun XunleiLoginScreen(
         }
     }
     // 登录成功后自动关闭登录页（短信/密码任一方式成功，账号非空即关闭）
-    LaunchedEffect(viewModel.xunleiAccount.value) {
-        if (viewModel.xunleiAccount.value != null) onSaved()
+    LaunchedEffect(account) {
+        if (account != null) onSaved()
     }
 
     BackHandler { onBack() }
@@ -148,6 +152,28 @@ fun XunleiLoginScreen(
                     },
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 ) { Text("重新发送验证码") }
+            }
+
+            // 未设置密码：跳转迅雷官网设置（浏览器打开）
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("https://i.xunlei.com/xluser/validate/findpwd_acc.html")
+                            )
+                        )
+                    }
+                },
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text(
+                    text = "未设置密码，点我前往设置",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
