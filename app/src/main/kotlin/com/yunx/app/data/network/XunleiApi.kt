@@ -364,6 +364,29 @@ class XunleiApi(
         }
     }
 
+    /** 分享子目录文件列表（share/detail，parent_id + pass_code_token） */
+    suspend fun getShareDetail(
+        shareId: String,
+        parentId: String,
+        passCodeToken: String,
+        accessToken: String,
+        deviceId: String,
+        captchaToken: String
+    ): List<ShareFile>? = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append(XunleiConstants.SHARE_DETAIL_URL)
+            append("?share_id=").append(shareId)
+            append("&parent_id=").append(parentId)
+            append("&pass_code_token=").append(java.net.URLEncoder.encode(passCodeToken, "UTF-8"))
+            append("&limit=100&page_token=&thumbnail_size=SIZE_SMALL")
+        }
+        panCall(captchaToken, deviceId, "GET:/drive/v1/share/detail", { t ->
+            panRequest(url, accessToken, deviceId, t)
+        }) { data ->
+            data.optJSONArray("files")?.let(::parseFileArray) ?: emptyList()
+        }
+    }
+
     /** 转存到指定目录，返回异步任务 id */
     suspend fun restore(
         shareId: String,

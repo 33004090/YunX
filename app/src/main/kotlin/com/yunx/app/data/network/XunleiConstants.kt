@@ -84,6 +84,9 @@ object XunleiConstants {
     /** 分享解析（GET ?share_id=&pass_code=&limit=&page_token=&thumbnail_size=） */
     const val SHARE_URL = "$PAN_BASE/drive/v1/share"
 
+    /** 分享子目录文件列表（GET ?share_id=&parent_id=&pass_code_token=&limit=&page_token=&thumbnail_size=） */
+    const val SHARE_DETAIL_URL = "$PAN_BASE/drive/v1/share/detail"
+
     /** 转存（POST） */
     const val RESTORE_URL = "$PAN_BASE/drive/v1/share/restore"
 

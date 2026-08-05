@@ -48,13 +48,15 @@ class XunleiResolveRepository(
 
     override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
         runCatching {
-            // 迅雷分享顶层即文件列表；dirFid 非空时尝试带 parent_id 翻页（分享子目录，待真机验证）
-            val share = if (dirFid.isBlank() || dirFid == "0") {
-                api.getShare(session.shareId, "", token(), deviceId(), captcha())
+            val access = token()
+            api.cacheUserId(access)
+            // 迅雷分享：顶层用 share（带提取码）；子目录用 share/detail（parent_id + pass_code_token）
+            val files = if (dirFid.isBlank() || dirFid == "0") {
+                api.getShare(session.shareId, passCodes[session.shareId] ?: "", access, deviceId(), captcha())?.files
             } else {
-                api.getShare(session.shareId, "", token(), deviceId(), captcha())
+                api.getShareDetail(session.shareId, dirFid, session.stoken, access, deviceId(), captcha())
             }
-            share?.files ?: throw IllegalStateException("未获取到文件列表")
+            files ?: throw IllegalStateException("未获取到文件列表")
         }.fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(it) }
