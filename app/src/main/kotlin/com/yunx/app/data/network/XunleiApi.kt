@@ -44,6 +44,14 @@ class XunleiApi(
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
+    /** captcha_invalid 时刷新出的新 captcha_token（后续请求优先使用） */
+    @Volatile
+    private var refreshedCaptcha: String? = null
+
+    /** 当前用户 ID（从 access_token JWT 解析，captcha init 的 meta 需要） */
+    @Volatile
+    private var currentUserId: String = ""
+
     // ---------- 登录 ----------
 
     /** 1. 验证码盾初始化，返回 captcha_token（换 token 与 pan 请求需带 X-Captcha-Token）。
@@ -191,10 +199,28 @@ class XunleiApi(
                 val json = JSONObject(resp.body?.string() ?: "{}")
                 val at = json.optString("access_token").ifBlank { json.optString("accessToken") }
                 val rt = json.optString("refresh_token").ifBlank { json.optString("refreshToken") }
-                if (at.isBlank()) null else at to rt
+                if (at.isBlank()) null else {
+                    // 缓存 user_id（JWT sub），captcha/init 的 meta 需要
+                    jwtSub(at).takeIf { it.isNotBlank() }?.let { currentUserId = it }
+                    at to rt
+                }
             }
         }.getOrNull()
     }
+
+    /** 缓存当前用户 ID（从 access_token JWT 解析），供 captcha/init 的 meta 使用 */
+    fun cacheUserId(accessToken: String) {
+        if (currentUserId.isBlank()) currentUserId = jwtSub(accessToken)
+    }
+
+    /** 从 JWT 中解析 sub（用户 ID） */
+    private fun jwtSub(token: String): String = runCatching {
+        val payload = token.split(".").getOrNull(1) ?: return@runCatching ""
+        val json = String(
+            android.util.Base64.decode(payload, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING)
+        )
+        JSONObject(json).optString("sub")
+    }.getOrDefault("")
 
     /** 解析 v3/login / v3/smslogin 响应 */
     private fun parseLoginResponse(json: JSONObject): XunleiLoginStep {
@@ -259,8 +285,9 @@ class XunleiApi(
             append("?parent_id=").append(parentId)
             append("&page_token=&limit=50&with_audit=true&filters=").append(filters)
         }
-        val request = panRequest(url, accessToken, deviceId, captchaToken)
-        parsePan(request) { data ->
+        panCall(captchaToken, deviceId, "GET:/drive/v1/files", { t ->
+            panRequest(url, accessToken, deviceId, t)
+        }) { data ->
             data.optJSONArray("files")?.let(::parseFileArray) ?: emptyList()
         }
     }
@@ -279,8 +306,9 @@ class XunleiApi(
             .put("parent_id", parentId)
             .put("space", 1)
             .toString()
-        val request = panRequest(XunleiConstants.FILES_URL, accessToken, deviceId, captchaToken, body)
-        parsePan(request) { data -> data.optString("id").takeIf { it.isNotBlank() } }
+        panCall(captchaToken, deviceId, "POST:/drive/v1/files", { t ->
+            panRequest(XunleiConstants.FILES_URL, accessToken, deviceId, t, body)
+        }) { data -> data.optString("id").takeIf { it.isNotBlank() } }
     }
 
     /** 文件详情（返回下载直链 links.application/octet-stream.url） */
@@ -292,8 +320,9 @@ class XunleiApi(
     ): DownloadLink? = withContext(Dispatchers.IO) {
         val url = "${XunleiConstants.FILES_URL}/$fileId?_magic=2021&usage=PLAY&thumbnail_size=SIZE_LARGE" +
             "&with=hdr10&with=subtitle_files&with=task&with=public_share_tag"
-        val request = panRequest(url, accessToken, deviceId, captchaToken)
-        parsePan(request) { data ->
+        panCall(captchaToken, deviceId, "GET:/drive/v1/files/$fileId", { t ->
+            panRequest(url, accessToken, deviceId, t)
+        }) { data ->
             val links = data.optJSONObject("links")
             val urlStr = links?.optJSONObject("application/octet-stream")?.optString("url")
                 ?: data.optString("web_content_link")
@@ -321,8 +350,9 @@ class XunleiApi(
             append("&pass_code=").append(java.net.URLEncoder.encode(passCode, "UTF-8"))
             append("&limit=100&page_token=&thumbnail_size=SIZE_SMALL")
         }
-        val request = panRequest(url, accessToken, deviceId, captchaToken)
-        parsePan(request) { data ->
+        panCall(captchaToken, deviceId, "GET:/drive/v1/share", { t ->
+            panRequest(url, accessToken, deviceId, t)
+        }) { data ->
             val files = data.optJSONArray("files")?.let(::parseFileArray) ?: emptyList()
             XunleiShareResult(
                 title = data.optString("title"),
@@ -351,8 +381,9 @@ class XunleiApi(
             .put("parent_folder_id", parentFolderId)
             .put("file_ids", JSONArray().apply { fileIds.forEach { put(it) } })
             .toString()
-        val request = panRequest(XunleiConstants.RESTORE_URL, accessToken, deviceId, captchaToken, body)
-        parsePan(request) { data ->
+        panCall(captchaToken, deviceId, "POST:/drive/v1/share/restore", { t ->
+            panRequest(XunleiConstants.RESTORE_URL, accessToken, deviceId, t, body)
+        }) { data ->
             data.optString("task_id").ifBlank { data.optString("taskId") }.takeIf { it.isNotBlank() }
         }
     }
@@ -363,11 +394,9 @@ class XunleiApi(
             val url = "${XunleiConstants.TASKS_URL}/$taskId?type=share"
             for (i in 0 until 15) {
                 val done = runCatching {
-                    val request = panRequest(url, accessToken, deviceId, captchaToken)
-                    client.newCall(request).execute().use { resp ->
-                        val json = JSONObject(resp.body?.string() ?: "{}")
-                        if (!resp.isSuccessful) return@use false
-                        val data = json.optJSONObject("data") ?: json
+                    panCall(captchaToken, deviceId, "GET:/drive/v1/tasks/$taskId", { t ->
+                        panRequest(url, accessToken, deviceId, t)
+                    }) { data ->
                         val status = data.optString("status").ifBlank { data.optString("phase") }
                         status == "PHASE_TYPE_COMPLETE" || data.optInt("error_code") == 0
                     }
@@ -430,20 +459,76 @@ class XunleiApi(
         else builder.get().build()
     }
 
-    /** pan 响应解析：HTTP 非 2xx 或 error 字段视为业务错误，透传 message */
-    private fun <T> parsePan(request: Request, parser: (JSONObject) -> T): T {
-        val response = client.newCall(request).execute()
-        val body = response.use { it.body?.string() ?: throw QuarkApiException("请求失败：响应为空") }
-        val json = runCatching { JSONObject(body) }.getOrElse {
-            throw QuarkApiException("响应解析失败")
+    /** pan 请求带验证码自动刷新重试：失败 captcha_invalid → 用旧 token 换新 token → 重试一次（对齐官方） */
+    private suspend fun <T> panCall(
+        captchaToken: String,
+        deviceId: String,
+        action: String,
+        build: (String) -> Request,
+        parse: (JSONObject) -> T
+    ): T {
+        var token = refreshedCaptcha ?: captchaToken
+        repeat(2) { attempt ->
+            val response = client.newCall(build(token)).execute()
+            val body = response.use { it.body?.string() ?: throw QuarkApiException("请求失败：响应为空") }
+            val json = runCatching { JSONObject(body) }.getOrElse {
+                throw QuarkApiException("响应解析失败")
+            }
+            if (!response.isSuccessful || json.has("error")) {
+                val err = json.optString("error")
+                if (err == "captcha_invalid" && attempt == 0) {
+                    // 用请求对应 action + 真实 user_id 重新 init 拿 pan 可用 token（对齐官方；先不带 captcha_sign）
+                    val newToken = initPanCaptcha(deviceId, action, currentUserId)
+                    if (!newToken.isNullOrBlank()) {
+                        refreshedCaptcha = newToken
+                        token = newToken
+                        return@repeat
+                    }
+                }
+                val msg = json.optString("error_description").ifBlank { json.optString("message") }
+                    .ifBlank { err }.ifBlank { "请求失败" }
+                throw QuarkApiException(msg)
+            }
+            return parse(json.optJSONObject("data") ?: json)
         }
-        if (!response.isSuccessful || json.has("error")) {
-            val msg = json.optString("error_description").ifBlank { json.optString("message") }
-                .ifBlank { json.optString("error") }.ifBlank { "请求失败" }
-            throw QuarkApiException(msg)
-        }
-        return parser(json.optJSONObject("data") ?: json)
+        throw QuarkApiException("验证码刷新后仍失败")
     }
+
+    /** 用请求对应 action + 真实 user_id 初始化 captcha（pan 专用，meta 带设备信息；先不带 captcha_sign） */
+    private suspend fun initPanCaptcha(deviceId: String, action: String, userId: String): String? =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("action", action)
+                .put("captcha_token", "")
+                .put("client_id", XunleiConstants.APP_CLIENT_ID)
+                .put("device_id", deviceId)
+                .put(
+                    "meta",
+                    JSONObject()
+                        .put("client_version", "8.31.0.9726")
+                        .put("package_name", "com.xunlei.downloadprovider")
+                        .put("user_id", userId)
+                        .put("timestamp", System.currentTimeMillis().toString())
+                )
+                .put("redirect_uri", "xlaccsdk01://xunlei.com/callback?state=harbor")
+                .toString()
+            val request = Request.Builder()
+                .url(XunleiConstants.CAPTCHA_INIT_URL)
+                .header("User-Agent", XunleiConstants.APP_UA)
+                .header("Accept", "application/json;charset=UTF-8")
+                .header("Content-Type", "application/json")
+                .header("X-Client-Id", XunleiConstants.APP_CLIENT_ID)
+                .header("X-Device-Id", deviceId)
+                .header("X-Client-Version", "8.31.0.9726")
+                .post(body.toRequestBody(jsonMediaType))
+                .build()
+            runCatching {
+                client.newCall(request).execute().use { resp ->
+                    val json = JSONObject(resp.body?.string() ?: "{}")
+                    json.optString("captcha_token").takeIf { it.isNotBlank() }
+                }
+            }.getOrNull()
+        }
 
     companion object {
         /** 设备 ID：复用官方抓包真实设备（devicesign 前半一致，保证设备指纹有效） */

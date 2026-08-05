@@ -35,7 +35,10 @@ class XunleiResolveRepository(
                 ?: throw IllegalArgumentException("无法识别迅雷分享链接")
             val effectivePwd = pwd?.takeIf { it.isNotBlank() } ?: ShareLinkParser.parse(link)?.pwd ?: ""
             passCodes[shareId] = effectivePwd
-            val result = api.getShare(shareId, effectivePwd, token(), deviceId(), captcha())
+            val access = token()
+            // 缓存 user_id（captcha/init 的 meta 需要）
+            api.cacheUserId(access)
+            val result = api.getShare(shareId, effectivePwd, access, deviceId(), captcha())
                 ?: throw IllegalStateException("未获取到分享信息")
             ShareSession(shareId, result.passCodeToken, result.title)
         }.fold(

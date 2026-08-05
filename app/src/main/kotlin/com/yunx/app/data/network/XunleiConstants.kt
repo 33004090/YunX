@@ -41,6 +41,9 @@ object XunleiConstants {
     /** 设备指纹（div101.设备ID+SDK指纹，官方 sendsms/smslogin/pan 全链路验证可用） */
     const val DEVICE_SIGN = "div101.78a70629a2b17d0b4302317ffa94807a31491e163e795b39e798ed33ae58858b"
 
+    /** captcha/init 刷新的 captcha_sign（官方抓包值，格式 1.+32hex；服务端主要校验格式） */
+    const val CAPTCHA_SIGN = "1.3a697b29ce15989bfb372702268e70a1"
+
     // ---------- 登录端点 ----------
 
     /** 验证码盾初始化 */

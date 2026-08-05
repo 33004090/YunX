@@ -49,9 +49,9 @@ fun XunleiLoginScreen(
             viewModel.consumeLoginError()
         }
     }
-    // 短信登录成功后关闭
+    // 登录成功后自动关闭登录页（短信/密码任一方式成功，账号非空即关闭）
     LaunchedEffect(viewModel.xunleiAccount.value) {
-        if (step == null && viewModel.xunleiAccount.value != null) onSaved()
+        if (viewModel.xunleiAccount.value != null) onSaved()
     }
 
     BackHandler { onBack() }
