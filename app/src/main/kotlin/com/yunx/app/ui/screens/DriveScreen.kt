@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.yunx.app.data.db.BaiduAccountEntity
 import com.yunx.app.data.db.QuarkAccountEntity
 import com.yunx.app.data.db.UCAccountEntity
 import com.yunx.app.data.db.XunleiAccountEntity
@@ -61,17 +62,21 @@ fun DriveScreen(
     quarkAccount: QuarkAccountEntity?,
     ucAccount: UCAccountEntity?,
     xunleiAccount: XunleiAccountEntity?,
+    baiduAccount: BaiduAccountEntity?,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
     onUCLogin: () -> Unit,
     onUCLogout: () -> Unit,
     onXunleiLogin: () -> Unit,
     onXunleiLogout: () -> Unit,
+    onBaiduLogin: () -> Unit,
+    onBaiduLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showQuarkSheet by remember { mutableStateOf(false) }
     var showUCSheet by remember { mutableStateOf(false) }
     var showXunleiSheet by remember { mutableStateOf(false) }
+    var showBaiduSheet by remember { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
@@ -94,6 +99,13 @@ fun DriveScreen(
         description = xunleiAccount?.nickname ?: "点击登录，支持解析下载",
         avatarText = "迅",
         isLoggedIn = xunleiAccount != null
+    )
+    val baidu = DriveAccount(
+        id = "baidu",
+        name = "百度网盘",
+        description = baiduAccount?.nickname ?: "点击登录，支持解析下载",
+        avatarText = "度",
+        isLoggedIn = baiduAccount != null
     )
     val others = remember {
         emptyList<DriveAccount>()
@@ -144,6 +156,16 @@ fun DriveScreen(
                 }
             )
         }
+        item(key = baidu.id) {
+            DriveAccountCard(
+                account = baidu,
+                onClick = if (baidu.isLoggedIn) {
+                    { showBaiduSheet = true }
+                } else {
+                    onBaiduLogin
+                }
+            )
+        }
         items(others, key = { it.id }) { account ->
             DriveAccountCard(account = account)
         }
@@ -182,6 +204,18 @@ fun DriveScreen(
                 showXunleiSheet = false
             },
             onDismiss = { showXunleiSheet = false }
+        )
+    }
+
+    // 已登录百度：点击卡片弹出账号信息底部弹窗
+    if (showBaiduSheet && baiduAccount != null) {
+        BaiduAccountSheet(
+            account = baiduAccount,
+            onLogout = {
+                onBaiduLogout()
+                showBaiduSheet = false
+            },
+            onDismiss = { showBaiduSheet = false }
         )
     }
 }

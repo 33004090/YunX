@@ -6,8 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [QuarkAccountEntity::class, DownloadTaskEntity::class, UCAccountEntity::class, XunleiAccountEntity::class],
-    version = 5,
+    entities = [QuarkAccountEntity::class, DownloadTaskEntity::class, UCAccountEntity::class, XunleiAccountEntity::class, BaiduAccountEntity::class],
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -19,6 +19,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun ucAccountDao(): UCAccountDao
 
     abstract fun xunleiAccountDao(): XunleiAccountDao
+
+    abstract fun baiduAccountDao(): BaiduAccountDao
 
     companion object {
         @Volatile

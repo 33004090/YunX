@@ -29,16 +29,20 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yunx.app.data.db.AppDatabase
 import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
+import com.yunx.app.data.network.BaiduApi
 import com.yunx.app.data.network.QuarkApi
 import com.yunx.app.data.network.UCApi
 import com.yunx.app.data.network.XunleiApi
 import com.yunx.app.data.prefs.SettingsRepository
+import com.yunx.app.data.repository.BaiduAccountRepository
+import com.yunx.app.data.repository.BaiduResolveRepository
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
 import com.yunx.app.data.repository.UCAccountRepository
 import com.yunx.app.data.repository.UCResolveRepository
 import com.yunx.app.data.repository.XunleiAccountRepository
 import com.yunx.app.data.repository.XunleiResolveRepository
+import com.yunx.app.ui.login.BaiduLoginScreen
 import com.yunx.app.ui.login.QuarkLoginScreen
 import com.yunx.app.ui.login.UCLoginScreen
 import com.yunx.app.ui.login.XunleiLoginScreen
@@ -47,6 +51,7 @@ import com.yunx.app.ui.screens.DownloadScreen
 import com.yunx.app.ui.screens.DriveScreen
 import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
+import com.yunx.app.ui.viewmodel.BaiduAccountViewModel
 import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
@@ -68,12 +73,14 @@ fun MainScreen() {
     var showQuarkLogin by rememberSaveable { mutableStateOf(false) }
     var showUCLogin by rememberSaveable { mutableStateOf(false) }
     var showXunleiLogin by rememberSaveable { mutableStateOf(false) }
+    var showBaiduLogin by rememberSaveable { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
     val api = remember { QuarkApi() }
     val ucApi = remember { UCApi() }
     val xunleiApi = remember { XunleiApi() }
+    val baiduApi = remember { BaiduApi() }
     val db = remember { AppDatabase.get(context) }
     val settings = remember { SettingsRepository(context) }
     val repository = remember {
@@ -84,6 +91,9 @@ fun MainScreen() {
     }
     val xunleiRepository = remember {
         XunleiAccountRepository(db.xunleiAccountDao(), xunleiApi)
+    }
+    val baiduRepository = remember {
+        BaiduAccountRepository(db.baiduAccountDao(), baiduApi)
     }
     // 下载管理器：OkHttp 分片下载器 + Room 任务持久化 + 可配置线程数（设置页动态生效）
     val downloadManager = remember {
@@ -103,6 +113,9 @@ fun MainScreen() {
     val xunleiViewModel: XunleiAccountViewModel = viewModel(
         factory = XunleiAccountViewModel.Factory(xunleiRepository)
     )
+    val baiduViewModel: BaiduAccountViewModel = viewModel(
+        factory = BaiduAccountViewModel.Factory(baiduRepository)
+    )
     val xunleiResolveRepository = remember {
         XunleiResolveRepository(
             api = xunleiApi,
@@ -110,6 +123,9 @@ fun MainScreen() {
             deviceIdProvider = { xunleiRepository.getAccount()?.deviceId },
             captchaProvider = { xunleiRepository.getAccount()?.captchaToken }
         )
+    }
+    val baiduResolveRepository = remember {
+        BaiduResolveRepository(baiduApi)
     }
     val resolveViewModel: ResolveViewModel = viewModel(
         factory = ResolveViewModel.Factory(
@@ -119,6 +135,8 @@ fun MainScreen() {
             UCResolveRepository(ucApi),
             xunleiRepository,
             xunleiResolveRepository,
+            baiduRepository,
+            baiduResolveRepository,
             downloadManager
         )
     )
@@ -128,6 +146,7 @@ fun MainScreen() {
     val quarkAccount by viewModel.quarkAccount.collectAsState()
     val ucAccount by ucViewModel.ucAccount.collectAsState()
     val xunleiAccount by xunleiViewModel.xunleiAccount.collectAsState()
+    val baiduAccount by baiduViewModel.baiduAccount.collectAsState()
 
     // 解析页发起下载后，自动切换到「下载」Tab
     LaunchedEffect(resolveViewModel.downloadStarted) {
@@ -163,6 +182,16 @@ fun MainScreen() {
             viewModel = xunleiViewModel,
             onBack = { showXunleiLogin = false },
             onSaved = { showXunleiLogin = false }
+        )
+        return
+    }
+
+    // 百度登录页：全屏覆盖（WebView 登录提取 Cookie）
+    if (showBaiduLogin) {
+        BaiduLoginScreen(
+            viewModel = baiduViewModel,
+            onBack = { showBaiduLogin = false },
+            onSaved = { showBaiduLogin = false }
         )
         return
     }
@@ -221,12 +250,15 @@ fun MainScreen() {
                         quarkAccount = quarkAccount,
                         ucAccount = ucAccount,
                         xunleiAccount = xunleiAccount,
+                        baiduAccount = baiduAccount,
                         onQuarkLogin = { showQuarkLogin = true },
                         onQuarkLogout = { viewModel.logout() },
                         onUCLogin = { showUCLogin = true },
                         onUCLogout = { ucViewModel.logout() },
                         onXunleiLogin = { showXunleiLogin = true },
-                        onXunleiLogout = { xunleiViewModel.logout() }
+                        onXunleiLogout = { xunleiViewModel.logout() },
+                        onBaiduLogin = { showBaiduLogin = true },
+                        onBaiduLogout = { baiduViewModel.logout() }
                     )
                     MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
                     MainTab.Settings -> SettingsScreen(

@@ -1,7 +1,7 @@
 package com.yunx.app.data.network
 
 /** 网盘平台 */
-enum class SharePlatform { QUARK, UC, XUNLEI }
+enum class SharePlatform { QUARK, UC, XUNLEI, BAIDU }
 
 /**
  * 解析结果：share_id + 提取码 + 平台。
@@ -22,6 +22,7 @@ object ShareLinkParser {
     private val quarkShareIdRegex = Regex("""pan\.quark\.cn/s/([A-Za-z0-9]+)""")
     private val ucShareIdRegex = Regex("""drive\.uc\.cn/s/([A-Za-z0-9]+)""")
     private val xunleiShareIdRegex = Regex("""pan\.xunlei\.com/s/([A-Za-z0-9_-]+)""")
+    private val baiduShareIdRegex = Regex("""pan\.baidu\.com/s/(1[A-Za-z0-9_-]+)""")
     private val pwdInUrlRegex = Regex("""[?&]pwd=([A-Za-z0-9]+)""")
     private val pwdInTextRegex = Regex("""提取码[：:]\s*([A-Za-z0-9]{4})""")
 
@@ -44,6 +45,14 @@ object ShareLinkParser {
             val pwd = pwdInUrlRegex.find(url)?.groupValues?.getOrNull(1)
                 ?: pwdInTextRegex.find(text)?.groupValues?.getOrNull(1)
             return ParsedShare(shareId = sid, pwd = pwd, platform = SharePlatform.XUNLEI)
+        }
+        // 百度链接：https://pan.baidu.com/s/1xxxxx?pwd=xxxx
+        baiduShareIdRegex.find(url)?.groupValues?.getOrNull(1)?.let { sid ->
+            // 百度 surl 不包含开头的 "1"（verify/list 接口用 1 后面的部分）
+            val surl = sid.removePrefix("1")
+            val pwd = pwdInUrlRegex.find(url)?.groupValues?.getOrNull(1)
+                ?: pwdInTextRegex.find(text)?.groupValues?.getOrNull(1)
+            return ParsedShare(shareId = surl, pwd = pwd, platform = SharePlatform.BAIDU)
         }
         return null
     }
