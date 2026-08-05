@@ -24,6 +24,13 @@ class XunleiResolveRepository(
     private suspend fun token(): String =
         accountProvider() ?: throw IllegalStateException("请先登录迅雷网盘")
 
+    /** 取 access_token 并缓存 user_id（captcha/init 需要，空 user_id 会得到降级 token） */
+    private suspend fun access(): String {
+        val t = token()
+        api.cacheUserId(t)
+        return t
+    }
+
     private suspend fun deviceId(): String =
         deviceIdProvider() ?: throw IllegalStateException("缺少设备标识")
 
@@ -35,9 +42,7 @@ class XunleiResolveRepository(
                 ?: throw IllegalArgumentException("无法识别迅雷分享链接")
             val effectivePwd = pwd?.takeIf { it.isNotBlank() } ?: ShareLinkParser.parse(link)?.pwd ?: ""
             passCodes[shareId] = effectivePwd
-            val access = token()
-            // 缓存 user_id（captcha/init 的 meta 需要）
-            api.cacheUserId(access)
+            val access = access()
             val result = api.getShare(shareId, effectivePwd, access, deviceId(), captcha())
                 ?: throw IllegalStateException("未获取到分享信息")
             ShareSession(shareId, result.passCodeToken, result.title)
@@ -48,8 +53,7 @@ class XunleiResolveRepository(
 
     override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
         runCatching {
-            val access = token()
-            api.cacheUserId(access)
+            val access = access()
             // 迅雷分享：顶层用 share（带提取码）；子目录用 share/detail（parent_id + pass_code_token）
             val files = if (dirFid.isBlank() || dirFid == "0") {
                 api.getShare(session.shareId, passCodes[session.shareId] ?: "", access, deviceId(), captcha())?.files
@@ -63,7 +67,7 @@ class XunleiResolveRepository(
         )
 
     override suspend fun ensureTempDir(cookie: String): Result<String> = runCatching {
-        api.ensureTempDir(token(), deviceId(), captcha())
+        api.ensureTempDir(access(), deviceId(), captcha())
             ?: throw IllegalStateException("创建临时目录失败")
     }.fold(
         onSuccess = { Result.success(it) },
@@ -76,27 +80,24 @@ class XunleiResolveRepository(
         toDirFid: String,
         cookie: String
     ): Result<String> = runCatching {
-        val taskId = api.restore(
+        // 官方同步转存：restore 返回 trace_file_ids 映射，直接得到转存后的新文件 id（无需轮询）
+        val newId = api.restore(
             shareId = session.shareId,
-            passCode = passCodes[session.shareId] ?: "",
             passCodeToken = session.stoken,
             parentFolderId = toDirFid,
             fileIds = listOf(file.fid),
-            accessToken = token(),
+            accessToken = access(),
             deviceId = deviceId(),
             captchaToken = captcha()
         ) ?: throw IllegalStateException("转存失败")
-        api.pollTask(taskId, token(), deviceId(), captcha())
-            .takeIf { it } ?: throw IllegalStateException("转存超时，请稍后重试")
-        // 转存后的文件 id：转存前后 id 通常保持一致（同名同 id 策略），直接复用分享文件 id
-        file.fid
+        newId
     }.fold(
         onSuccess = { Result.success(it) },
         onFailure = { Result.failure(it) }
     )
 
     override suspend fun getDownloadLink(fid: String, cookie: String): Result<DownloadLink> = runCatching {
-        api.getFileDetail(fid, token(), deviceId(), captcha())
+        api.getFileDetail(fid, access(), deviceId(), captcha())
             ?: throw IllegalStateException("获取下载链接失败")
     }.fold(
         onSuccess = { Result.success(it) },
@@ -111,7 +112,7 @@ class XunleiResolveRepository(
     ): Result<DownloadLink> = runCatching {
         val dirFid = ensureTempDir(cookie).getOrThrow()
         val savedFid = transferFile(session, file, dirFid, cookie).getOrThrow()
-        api.getFileDetail(savedFid, token(), deviceId(), captcha())
+        api.getFileDetail(savedFid, access(), deviceId(), captcha())
             ?: throw IllegalStateException("获取下载链接失败")
     }.fold(
         onSuccess = { Result.success(it) },

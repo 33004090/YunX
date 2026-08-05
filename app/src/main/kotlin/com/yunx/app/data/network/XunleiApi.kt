@@ -305,7 +305,7 @@ class XunleiApi(
             .put("kind", "drive#folder")
             .put("name", name)
             .put("parent_id", parentId)
-            .put("space", 1)
+            .put("space", "") // 官方 proto 要求字符串，数字会 400
             .toString()
         panCall(captchaToken, deviceId, "POST:/drive/v1/files", { t ->
             panRequest(XunleiConstants.FILES_URL, accessToken, deviceId, t, body)
@@ -387,10 +387,9 @@ class XunleiApi(
         }
     }
 
-    /** 转存到指定目录，返回异步任务 id */
+    /** 转存到指定目录（官方同步返回 RESTORE_COMPLETE + trace_file_ids 映射），返回转存后的新文件 id */
     suspend fun restore(
         shareId: String,
-        passCode: String,
         passCodeToken: String,
         parentFolderId: String,
         fileIds: List<String>,
@@ -400,15 +399,24 @@ class XunleiApi(
     ): String? = withContext(Dispatchers.IO) {
         val body = JSONObject()
             .put("share_id", shareId)
-            .put("pass_code", passCode)
             .put("pass_code_token", passCodeToken)
-            .put("parent_folder_id", parentFolderId)
+            .put("parent_id", parentFolderId)
+            .put("ancestor_ids", JSONArray())
             .put("file_ids", JSONArray().apply { fileIds.forEach { put(it) } })
+            .put("specify_parent_id", true)
             .toString()
         panCall(captchaToken, deviceId, "POST:/drive/v1/share/restore", { t ->
             panRequest(XunleiConstants.RESTORE_URL, accessToken, deviceId, t, body)
         }) { data ->
-            data.optString("task_id").ifBlank { data.optString("taskId") }.takeIf { it.isNotBlank() }
+            // params.trace_file_ids 是 JSON 字符串：{"分享文件id":"转存后新id"}
+            val trace = data.optJSONObject("params")?.optString("trace_file_ids").orEmpty()
+            runCatching {
+                val map = JSONObject(trace)
+                fileIds.firstOrNull { map.has(it) }
+                    ?.let { map.optString(it) }
+                    ?.takeIf { it.isNotBlank() }
+            }.getOrNull()
+                ?: data.optString("file_id").takeIf { it.isNotBlank() }
         }
     }
 
@@ -536,7 +544,7 @@ class XunleiApi(
                         .put("package_name", XunleiConstants.APP_PACKAGE_NAME)
                         .put("timestamp", ts)
                         .put("captcha_sign", sign)
-                        .put("user_id", "")
+                        .put("user_id", currentUserId) // 真实 user_id，空会得到降级 token（POST 类接口拒绝）
                 )
                 .put("captcha_token", oldToken)
                 .toString()
