@@ -7,9 +7,9 @@ import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareSession
 
 /**
- * 百度分享解析仓库：verify 拿 sekey → xpan/share 列文件 → 转存临时目录 → filemetas 拿直链 → 删除转存。
- * 全部基于抓包链路（share/verify → xpan/share list → share/transfer → filemetas），
- * 直链 URL 自带签名，拿链后立即删除临时转存（失败不阻断下载）。
+ * 百度分享解析仓库：verify 拿 sekey → xpan/share 列文件 → 转存根目录 → locatedownload 拿 appall 高速链 → 下载完成后删除转存。
+ * 全部基于抓包链路（share/verify → xpan/share list → share/transfer → locatedownload），
+ * appall 直链 URL 自带签名，下载完成后由 cleanupPending 删除转存（失败不阻断）。
  */
 class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository {
 
@@ -83,7 +83,7 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         onFailure = { Result.failure(it) }
     )
 
-    /** 百度取直链：转存根目录 → filemetas 拿 dlink → 记录待清理路径（下载完成后删除） */
+    /** 百度取直链：转存根目录 → locatedownload 拿 appall 高速链（对齐 MoePal）→ 记录待清理路径（下载完成后删除） */
     override suspend fun getShareDownloadLink(
         session: ShareSession,
         file: ShareFile,
@@ -92,9 +92,11 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         val (shareId, uk) = requireShareInfo(session, cookie)
         val dirPath = ensureTempDir(cookie).getOrThrow()
         val transferred = api.transfer(shareId, uk, session.stoken, file.fid, dirPath, cookie)
-        val dlink = api.fileMetasDlink(transferred.fsId, cookie)
-        // 百度 filemetas 的 dlink 在转存文件被删除后立即失效（31066），
-        // 因此不能先删后下：记录路径，待下载完成后由 cleanupPending 删除
+        // locatedownload 按转存后的完整路径取链，返回 appallNN.baidupcs.com CDN 直链
+        // （自带 sign/expires，删除转存后仍有效；仅需 BDUSS + 手机 UA 即可满速下载）
+        val dlink = api.locateDownload(transferred.path, cookie)
+        // 双保险：appall 链理论上不依赖转存文件存活，但仍保留"下载完成后删除转存"的清理机制，
+        // 避免根目录残留临时文件
         pendingCleanupPath = transferred.path
         DownloadLink(
             fid = transferred.fsId,

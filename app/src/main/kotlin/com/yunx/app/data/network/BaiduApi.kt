@@ -263,7 +263,48 @@ class BaiduApi(
     // ---------- 下载直链 ----------
 
     /**
-     * 获取下载直链：filemetas 为主，返回 dlink。
+     * 获取高速下载直链（官方 locatedownload 接口，对齐 MoePal 抓包）：
+     * POST d.pcs.baidu.com/rest/2.0/pcs/file?method=locatedownload&path=<转存后完整路径>，
+     * 响应 urls[].url 即 appallNN.baidupcs.com CDN 直链（自带 sign/expires，无需计算）。
+     * 仅需 BDUSS 登录态 + 手机 UA；psign 为写死常量，rand/devuid 复用抓包常量即可。
+     * @return appall 直链；失败抛异常
+     */
+    suspend fun locateDownload(path: String, cookie: String): String = withContext(Dispatchers.IO) {
+        val time = System.currentTimeMillis() / 1000
+        // 抓包常量：psign 写死；rand/devuid/cuid/deviceid 有 BDUSS 登录态时可直接复用
+        val url = "https://d.pcs.baidu.com/rest/2.0/pcs/file" +
+            "?method=locatedownload" +
+            "&app_id=${BaiduConstants.APP_ID}" +
+            "&clienttype=17&ver=4.0" +
+            "&ant=1&check_blue=1&es=1&esl=1&apn_id=1_-1" +
+            "&freeisp=0&queryfree=0&use=1&dtype=1&eck=1&ehps=1" +
+            "&err_ver=1.0&network_type=WIFI&channel=0" +
+            "&path=${urlEncode(path)}" +
+            "&time=$time" +
+            "&rand=5ed606e9da222cde0474cdf70eda884b" +
+            "&devuid=0F1E9FC2E084472DA5A61C4CF4C759AF" +
+            "&cuid=0F1E9FC2E084472DA5A61C4CF4C759AF" +
+            "&deviceid=348642637967375013" +
+            "&psign=860a071f77c860e8cea06e4e54c518f3" +
+            "&version=2.2.111.34&version_app=12.24.6&vip=0"
+        val request = Request.Builder()
+            .url(url)
+            .header("Cookie", cookie)
+            .header("User-Agent", BaiduConstants.UA_NETDISK)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .post("0".toRequestBody(formMediaType))
+            .build()
+        val json = executeJson(request)
+        checkErrno(json, "获取高速下载链接失败")
+        val urls = json.optJSONArray("urls")
+        val first = urls?.optJSONObject(0)?.optString("url")?.takeIf { it.isNotBlank() }
+            ?: throw BaiduApiException("未返回下载链接")
+        first
+    }
+
+    /**
+     * 获取下载直链：filemetas（按 fs_id 取链，个人网盘文件无 path 时使用）。
+     * 注意：该 dlink（d.pcs.baidu.com）在文件被删除后立即失效，仅限文件仍存在时下载。
      * @return dlink；失败抛异常
      */
     suspend fun fileMetasDlink(fsId: String, cookie: String): String = withContext(Dispatchers.IO) {

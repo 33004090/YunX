@@ -250,8 +250,8 @@ class ResolveViewModel(
                 url = link.downloadUrl,
                 fileName = link.filename,
                 headers = headers,
-                // 百度：filemetas 直链在转存文件删除后失效，故下载成功完成后才删除临时转存
-                onComplete = if (isBaidu) {
+                // 百度：locatedownload 的 appall 链删除转存后仍有效，但仍保留"下载完成后删除转存"的清理机制
+    onComplete = if (isBaidu) {
                     { baiduResolveRepository.cleanupPending(credential) }
                 } else {
                     {}
