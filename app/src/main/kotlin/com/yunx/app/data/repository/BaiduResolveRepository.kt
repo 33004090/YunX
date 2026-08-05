@@ -19,6 +19,10 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
     /** surl -> (share_id, uk)，由列表接口返回（转存必需） */
     private val shareInfos = mutableMapOf<String, Pair<String, String>>()
 
+    /** 最近一次转存文件的路径（下载完成后由 cleanupPending 删除） */
+    @Volatile
+    private var pendingCleanupPath: String? = null
+
     override suspend fun createSession(link: String, pwd: String?, cookie: String): Result<ShareSession> =
         runCatching {
             val parsed = ShareLinkParser.parse(link)
@@ -79,7 +83,7 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         onFailure = { Result.failure(it) }
     )
 
-    /** 百度取直链：转存临时目录 → filemetas 拿 dlink → 删除临时转存文件 */
+    /** 百度取直链：转存根目录 → filemetas 拿 dlink → 记录待清理路径（下载完成后删除） */
     override suspend fun getShareDownloadLink(
         session: ShareSession,
         file: ShareFile,
@@ -89,8 +93,9 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         val dirPath = ensureTempDir(cookie).getOrThrow()
         val transferred = api.transfer(shareId, uk, session.stoken, file.fid, dirPath, cookie)
         val dlink = api.fileMetasDlink(transferred.fsId, cookie)
-        // 直链自带签名，拿链后立即删除临时转存（失败不阻断下载）
-        runCatching { api.deleteFile(transferred.path, cookie) }
+        // 百度 filemetas 的 dlink 在转存文件被删除后立即失效（31066），
+        // 因此不能先删后下：记录路径，待下载完成后由 cleanupPending 删除
+        pendingCleanupPath = transferred.path
         DownloadLink(
             fid = transferred.fsId,
             filename = file.fname,
@@ -101,6 +106,13 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         onSuccess = { Result.success(it) },
         onFailure = { Result.failure(it) }
     )
+
+    /** 删除最近一次转存的临时文件（下载成功完成后调用；失败不阻断） */
+    suspend fun cleanupPending(cookie: String) {
+        val path = pendingCleanupPath ?: return
+        pendingCleanupPath = null
+        runCatching { api.deleteFile(path, cookie) }
+    }
 
     /** 取 share_id/uk：优先用列表接口缓存的，否则先列一次根目录 */
     private suspend fun requireShareInfo(session: ShareSession, cookie: String): Pair<String, String> {

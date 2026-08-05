@@ -249,7 +249,13 @@ class ResolveViewModel(
             downloadManager.enqueue(
                 url = link.downloadUrl,
                 fileName = link.filename,
-                headers = headers
+                headers = headers,
+                // 百度：filemetas 直链在转存文件删除后失效，故下载成功完成后才删除临时转存
+                onComplete = if (isBaidu) {
+                    { baiduResolveRepository.cleanupPending(credential) }
+                } else {
+                    {}
+                }
             )
             downloadStarted = true
         }

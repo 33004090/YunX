@@ -66,6 +66,9 @@ class DownloadManager(
     /** 任务请求头（Cookie/UA），暂停后恢复仍需使用 */
     private val taskHeaders = ConcurrentHashMap<Long, Map<String, String>>()
 
+    /** 任务下载完成后的清理回调（如删除网盘临时转存文件；下载成功后才触发） */
+    private val taskCallbacks = ConcurrentHashMap<Long, suspend () -> Unit>()
+
     /** 实时下载统计（速度/剩余时间/线程数） */
     private val _stats = MutableStateFlow<Map<Long, DownloadStats>>(emptyMap())
     val stats: StateFlow<Map<Long, DownloadStats>> = _stats.asStateFlow()
@@ -76,7 +79,13 @@ class DownloadManager(
     val tasks: Flow<List<DownloadTaskEntity>> = dao.observeAll()
 
     /** 入队并立即开始下载 */
-    suspend fun enqueue(url: String, fileName: String, headers: Map<String, String> = emptyMap()): Long {
+    suspend fun enqueue(
+        url: String,
+        fileName: String,
+        headers: Map<String, String> = emptyMap(),
+        /** 下载成功完成后的清理回调（如删除网盘临时转存文件）；失败/取消不触发 */
+        onComplete: suspend () -> Unit = {}
+    ): Long {
         // 文件名兜底：空白时从 URL 推导，避免保存时变成时间戳
         val safeName = fileName.ifBlank {
             url.substringAfterLast('/').substringBefore('?')
@@ -90,6 +99,7 @@ class DownloadManager(
         )
         // 保存请求头（Cookie/UA），暂停后恢复仍需携带
         if (headers.isNotEmpty()) taskHeaders[id] = headers
+        taskCallbacks[id] = onComplete
         start(id, headers)
         return id
     }
@@ -168,6 +178,7 @@ class DownloadManager(
         downloader.cancelCalls(id)
         _stats.update { it - id }
         taskHeaders.remove(id)
+        taskCallbacks.remove(id)
         taskLocks.remove(id)
         val deferred = synchronized(jobsLock) { activeJobs.remove(id) }
         scope.launch {
@@ -281,6 +292,11 @@ class DownloadManager(
         val savedPath = DownloadSaver.save(context, task.fileName, merged)
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
+
+        // 下载成功：触发清理回调（删除网盘临时转存文件等）；失败/取消不触发
+        taskCallbacks.remove(id)?.let { cb ->
+            runCatching { cb() }
+        }
 
         // 清理临时文件与统计
         _stats.update { it - id }
