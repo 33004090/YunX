@@ -1,7 +1,6 @@
 package com.yunx.app.data.repository
 
 import com.yunx.app.data.network.BaiduApi
-import com.yunx.app.data.network.BaiduConstants
 import com.yunx.app.data.network.ShareLinkParser
 import com.yunx.app.data.network.model.DownloadLink
 import com.yunx.app.data.network.model.ShareFile
@@ -49,15 +48,9 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         )
 
     override suspend fun ensureTempDir(cookie: String): Result<String> = runCatching {
-        val existing = api.listDir("/", cookie)
-        if (existing.any { it.endsWith("/${BaiduConstants.TEMP_DIR_NAME}") || it == "/${BaiduConstants.TEMP_DIR_NAME}" }) {
-            "/${BaiduConstants.TEMP_DIR_NAME}"
-        } else {
-            if (!api.createDir("/${BaiduConstants.TEMP_DIR_NAME}", cookie)) {
-                throw IllegalStateException("创建临时目录失败")
-            }
-            "/${BaiduConstants.TEMP_DIR_NAME}"
-        }
+        // 直接转存到网盘根目录（必然存在），彻底绕开 filemanager 建目录（mkdir 在普通 Cookie 下 errno=2）。
+        // 转存后立即取直链并删除，根目录不留残留。
+        "/"
     }.fold(
         onSuccess = { Result.success(it) },
         onFailure = { Result.failure(it) }

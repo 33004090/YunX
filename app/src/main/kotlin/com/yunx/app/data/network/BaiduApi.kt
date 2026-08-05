@@ -181,10 +181,12 @@ class BaiduApi(
         val bdstoken = getBdstoken(cookie) ?: return@withContext false
         val body = "path=${urlEncode(path)}&isdir=1"
         val request = Request.Builder()
-            .url("https://pan.baidu.com/api/filemanager?opera=create" +
-                "&bdstoken=$bdstoken&clienttype=0&app_id=${BaiduConstants.APP_ID}&web=1")
+            // 创建目录用 opera=mkdir（opera=create 会被拒 errno=2）；对齐官方/BaiduPCS-Go 参数
+            .url("https://pan.baidu.com/api/filemanager?opera=mkdir&async=2&onnest=fail" +
+                "&newVerify=1&bdstoken=$bdstoken&channel=chunlei&clienttype=0&app_id=${BaiduConstants.APP_ID}&web=1")
             .header("Cookie", cookie)
             .header("User-Agent", BaiduConstants.UA_NETDISK)
+            .header("Referer", "https://pan.baidu.com/disk/home")
             .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             .post(body.toRequestBody(formMediaType))
             .build()
@@ -234,11 +236,15 @@ class BaiduApi(
             "&channel=chunlei&sekey=$sekey&ondup=newcopy&web=1&app_id=${BaiduConstants.APP_ID}" +
             "&bdstoken=$bdstoken&clienttype=0"
         val body = "fsidlist=%5B%22$fsId%22%5D&path=${urlEncode(toDir)}"
+        // verify 响应会 Set-Cookie: BDCLND=<randsk>，transfer 必须携带（分享验证标识），
+        // 缺失会 errno=2；BDCLND 值即 sekey（randsk），手动补齐
+        val authCookie = if (cookie.contains("BDCLND=")) cookie else "$cookie; BDCLND=$sekey"
         val request = Request.Builder()
             .url(url)
-            .header("Cookie", cookie)
+            .header("Cookie", authCookie)
             .header("User-Agent", BaiduConstants.UA_WEB)
             .header("Origin", "https://pan.baidu.com")
+            .header("Referer", "https://pan.baidu.com/s/")
             .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             .post(body.toRequestBody(formMediaType))
             .build()
