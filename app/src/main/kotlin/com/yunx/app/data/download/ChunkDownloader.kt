@@ -2,19 +2,36 @@ package com.yunx.app.data.download
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.coroutineContext
 
 /**
  * OkHttp 分片下载器：
  * - 支持 Range 分片请求、多线程并行下载；
  * - 断点续传：part 文件已存在部分时从已有大小继续；
- * - 分片完成后按顺序合并为完整文件。
+ * - 分片完成后按顺序合并为完整文件；
+ * - 任务级取消：每个任务的 OkHttp Call 统一登记，暂停/删除时主动 cancel() 立即中断阻塞 IO。
  */
 class ChunkDownloader(private val client: OkHttpClient) {
+
+    /** 任务 id → 该任务当前所有分片请求（供暂停/删除时立即中断网络） */
+    private val activeCalls = ConcurrentHashMap<Long, MutableSet<Call>>()
+
+    /** 取消指定任务的所有分片请求（立即中断阻塞 IO，不依赖协程取消传播） */
+    fun cancelCalls(taskId: Long) {
+        activeCalls.remove(taskId)?.forEach { call ->
+            runCatching { call.cancel() }
+        }
+    }
 
     /**
      * 获取文件总大小：用 Range: bytes=0-0 请求解析 Content-Range 的 total。
@@ -27,16 +44,23 @@ class ChunkDownloader(private val client: OkHttpClient) {
             .apply { headers.forEach { (k, v) -> header(k, v) } }
             .get()
             .build()
-        runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-                // Content-Range: bytes 0-0/123456
-                response.header("Content-Range")
-                    ?.substringAfter('/')
-                    ?.toLongOrNull()
-                    ?: response.header("Content-Length")?.toLongOrNull()
-            }
-        }.getOrNull()
+        val call = client.newCall(request)
+        // 协程取消（暂停/删除）时立即中断网络请求
+        val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
+        try {
+            runCatching {
+                call.execute().use { response ->
+                    if (!response.isSuccessful) return@use null
+                    // Content-Range: bytes 0-0/123456
+                    response.header("Content-Range")
+                        ?.substringAfter('/')
+                        ?.toLongOrNull()
+                        ?: response.header("Content-Length")?.toLongOrNull()
+                }
+            }.getOrNull()
+        } finally {
+            cancelHandle?.dispose()
+        }
     }
 
     /**
@@ -45,6 +69,7 @@ class ChunkDownloader(private val client: OkHttpClient) {
      * @return 是否成功
      */
     suspend fun downloadChunk(
+        taskId: Long,
         url: String,
         start: Long,
         end: Long,
@@ -65,8 +90,13 @@ class ChunkDownloader(private val client: OkHttpClient) {
             .get()
             .build()
 
-        runCatching {
-            client.newCall(request).execute().use { response ->
+        val call = client.newCall(request)
+        // 登记到任务级集合：暂停/删除时 DownloadManager 主动 cancelCalls() 立即中断阻塞 IO
+        activeCalls.getOrPut(taskId) { ConcurrentHashMap.newKeySet() }.add(call)
+        // 协程取消（暂停/删除）时也立即中断网络请求（双保险）
+        val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
+        try {
+            call.execute().use { response ->
                 // 206 分片响应；200 表示服务器忽略 Range（仅允许 start=0 单片场景）
                 if (response.code != 206 && !(response.code == 200 && start == 0L)) return@use false
                 val body = response.body ?: return@use false
@@ -84,10 +114,16 @@ class ChunkDownloader(private val client: OkHttpClient) {
                 }
                 true
             }
-        }.getOrElse { e ->
-            // 取消（暂停）必须向上传播，不能当作下载失败
-            if (e is CancellationException) throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            // 协程已被取消（暂停/删除）：网络中断属于正常取消，向上传播，
+            // 不能让外层误判为"分片下载失败"而覆盖 PAUSED 状态
+            if (!isActive) throw CancellationException("下载被取消", e)
             false
+        } finally {
+            activeCalls[taskId]?.remove(call)
+            cancelHandle?.dispose()
         }
     }
 

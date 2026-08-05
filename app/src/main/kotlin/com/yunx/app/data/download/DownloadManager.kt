@@ -4,11 +4,14 @@ import android.content.Context
 import com.yunx.app.data.db.DownloadTaskDao
 import com.yunx.app.data.db.DownloadTaskEntity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +26,7 @@ import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.coroutineContext
 import kotlin.math.ceil
 import kotlin.math.min
 
@@ -48,7 +52,13 @@ class DownloadManager(
     private val threadProvider: () -> Int = { 16 }
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val activeJobs = ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
+
+    /**
+     * 运行中的任务 Job：value 为 CompletableDeferred，注册/移除全程由 jobsLock 保护，
+     * 保证 start/pause/remove 之间无 TOCTOU 竞态（防止"暂停/删除瞬间任务继续跑"）。
+     */
+    private val activeJobs = ConcurrentHashMap<Long, CompletableDeferred<Job>>()
+    private val jobsLock = Any()
 
     /** 每个任务一把互斥锁：暂停后立即恢复时避免新旧协程并发写分片 */
     private val taskLocks = ConcurrentHashMap<Long, Mutex>()
@@ -86,36 +96,66 @@ class DownloadManager(
 
     /** 开始/恢复下载（断点续传） */
     fun start(id: Long, headers: Map<String, String> = emptyMap()) {
-        if (activeJobs.containsKey(id)) return
         // 恢复时未传 headers：沿用入队时保存的（Cookie/UA 对直链下载是必需的）
         val effectiveHeaders = headers.ifEmpty { taskHeaders[id] ?: emptyMap() }
-        val job = scope.launch {
-            try {
-                // 任务级互斥：同一任务串行执行，暂停后立刻恢复不会并发写分片
-                taskLocks.getOrPut(id) { Mutex() }.withLock {
-                    runTask(id, effectiveHeaders)
-                }
-            } catch (e: CancellationException) {
-                // 主动暂停：part 文件保留；状态已由 pause() 设置，此处只清理统计
-                // （不写状态，避免覆盖暂停后立刻恢复的新任务状态）
-                _stats.update { it - id }
-            } catch (e: Exception) {
-                _stats.update { it - id }
-                dao.updateStatus(id, DownloadTaskEntity.STATUS_FAILED)
-                dao.updateError(id, e.message ?: e.javaClass.simpleName)
-            } finally {
+        synchronized(jobsLock) {
+            // 原子注册：检查 + 占位 + launch + complete 在同一锁内完成，
+            // pause/remove 要么拿到已注册的 job，要么拿不到（视为未运行）
+            val existing = activeJobs[id]
+            if (existing != null) {
+                // job 仍活跃（正在下载/收尾）：忽略本次 start，避免重复启动
+                if (existing.isCompleted && existing.getCompleted().isActive) return
+                // job 已结束但 finally 尚未清理（暂停后立即恢复的残留）：
+                // 移除旧引用，继续注册新 job，保证"点开始"立即生效
                 activeJobs.remove(id)
-                // 注意：taskLocks 不在此清理 —— 若新任务已 getOrPut 拿到锁，
-                // 旧任务 finally 的 remove 会误删新任务的锁导致并发写分片
             }
+            val deferred = CompletableDeferred<Job>()
+            activeJobs[id] = deferred
+            val job = scope.launch {
+                try {
+                    // 任务级互斥：同一任务串行执行，暂停后立刻恢复不会并发写分片
+                    taskLocks.getOrPut(id) { Mutex() }.withLock {
+                        runTask(id, effectiveHeaders)
+                    }
+                } catch (e: CancellationException) {
+                    // 主动暂停/删除：part 文件保留（或由 remove 清理）；状态已由调用方设置
+                    _stats.update { it - id }
+                } catch (e: Exception) {
+                    _stats.update { it - id }
+                    // 协程已被取消（暂停/删除）：不标记失败，避免覆盖 PAUSED 状态
+                    if (isTaskActive()) {
+                        dao.updateStatus(id, DownloadTaskEntity.STATUS_FAILED)
+                        dao.updateError(id, e.message ?: e.javaClass.simpleName)
+                    }
+                } finally {
+                    // 只移除自己注册的 deferred：
+                    // 若暂停后立即恢复（新 job 已注册到同一 id），不能误删新任务的注册，
+                    // 否则新任务将无法再被暂停/删除（后台继续下载）
+                    synchronized(jobsLock) {
+                        if (activeJobs[id] === deferred) activeJobs.remove(id)
+                    }
+                    // 注意：taskLocks 不在此清理 —— 若新任务已 getOrPut 拿到锁，
+                    // 旧任务 finally 的 remove 会误删新任务的锁导致并发写分片
+                }
+            }
+            // launch 是同步返回 Job 的，锁内 complete，pause/remove 的 await 立即返回
+            deferred.complete(job)
         }
-        activeJobs[id] = job
     }
 
     /** 暂停下载（保留 part 文件与请求头） */
     fun pause(id: Long) {
-        activeJobs.remove(id)?.cancel()
+        // 立即中断该任务所有分片网络请求（不依赖协程取消传播，阻塞 IO 马上停止）
+        downloader.cancelCalls(id)
+        val deferred = synchronized(jobsLock) { activeJobs.remove(id) }
         _stats.update { it - id }
+        if (deferred != null) {
+            scope.launch {
+                // deferred 已在 start 的锁内 complete，await 立即返回；
+                // cancel 触发协程退出（网络已由 cancelCalls 中断）
+                deferred.await().cancel()
+            }
+        }
         scope.launch { dao.updateStatus(id, DownloadTaskEntity.STATUS_PAUSED) }
     }
 
@@ -124,11 +164,18 @@ class DownloadManager(
      * @param deleteLocal 同时删除已保存到本地的文件（savePath）
      */
     fun remove(id: Long, deleteLocal: Boolean = false) {
-        activeJobs.remove(id)?.cancel()
+        // 立即中断该任务所有分片网络请求
+        downloader.cancelCalls(id)
         _stats.update { it - id }
         taskHeaders.remove(id)
         taskLocks.remove(id)
+        val deferred = synchronized(jobsLock) { activeJobs.remove(id) }
         scope.launch {
+            // 若任务正在下载：取消并等待协程真正退出，
+            // 确保没有后台残留下载、part 文件无 fd 占用（否则删了仍占空间）
+            if (deferred != null) {
+                deferred.await().cancelAndJoin()
+            }
             if (deleteLocal) {
                 dao.get(id)?.savePath?.let { DownloadSaver.delete(context, it) }
             }
@@ -139,13 +186,20 @@ class DownloadManager(
 
     // ---------- 内部实现 ----------
 
+    /** 当前协程是否仍活跃（暂停/删除触发取消后为 false） */
+    private suspend fun isTaskActive(): Boolean = coroutineContext[Job]?.isActive == true
+
     private suspend fun runTask(id: Long, headers: Map<String, String>) {
+        // 协程已被取消（暂停/删除）：直接退出，不写状态
+        if (!isTaskActive()) return
         val task = dao.get(id) ?: return
         dao.updateStatus(id, DownloadTaskEntity.STATUS_DOWNLOADING)
 
         val total = downloader.getTotalSize(task.url, headers)
             ?: throw IllegalStateException("无法获取文件大小")
         dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, task.downloadedSize, total)
+        // 取到大小后再次检查取消（暂停可能发生在 getTotalSize 期间）
+        if (!isTaskActive()) return
 
         val chunkCount = chunkCountFor(total)
         val chunkSize = ceil(total.toDouble() / chunkCount).toLong()
@@ -176,6 +230,7 @@ class DownloadManager(
                         val end = min(start + chunkSize - 1, total - 1)
                         try {
                             downloader.downloadChunk(
+                                taskId = id,
                                 url = task.url,
                                 start = start,
                                 end = end,
@@ -183,6 +238,9 @@ class DownloadManager(
                                 headers = headers
                             ) { bytes ->
                                 val new = downloaded.addAndGet(bytes)
+                                // 暂停/删除已触发取消：跳过进度上报与状态更新，
+                                // 避免把 PAUSED 覆盖回 DOWNLOADING（"暂停后闪一下又开始了"）
+                                if (!isTaskActive()) return@downloadChunk
                                 // 速度/剩余时间统计（每 500ms 更新一次）
                                 speedRecorder.onBytes(new)?.let { speed ->
                                     val remain = if (speed > 0) (total - new) * 1000 / speed else -1L
@@ -207,6 +265,8 @@ class DownloadManager(
             results.all { it }
         }
         if (!allOk) throw IllegalStateException(failedReason.get() ?: "分片下载失败")
+        // 下载完成但已取消（删除/暂停发生在合并前）：不再合并保存
+        if (!isTaskActive()) return
 
         // 合并分片
         val merged = File(context.cacheDir, "merged_$id")
@@ -214,6 +274,8 @@ class DownloadManager(
         if (!downloader.mergeChunks(chunkFiles, merged)) {
             throw IllegalStateException("合并分片失败")
         }
+        // 合并完成但已取消（删除发生在合并期间）：不保存，避免向公共目录写入残留文件
+        if (!isTaskActive()) return
 
         // 保存到公共 Download 目录
         val savedPath = DownloadSaver.save(context, task.fileName, merged)

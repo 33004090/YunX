@@ -201,8 +201,10 @@ private fun DeleteConfirmDialog(
                 Text(
                     text = if (hasLocalFile) {
                         "勾选后将一并删除已下载到 Download 目录的文件，且不可恢复。"
-                    } else {
+                    } else if (task.status == DownloadTaskEntity.STATUS_COMPLETED) {
                         "该任务没有已完成的本地文件。"
+                    } else {
+                        "该任务尚未完成，删除后将同时清除已下载的临时文件，且不可恢复。"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

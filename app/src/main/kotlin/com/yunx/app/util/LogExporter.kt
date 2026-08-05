@@ -102,7 +102,12 @@ object LogExporter {
             putExtra(Intent.EXTRA_SUBJECT, file.name)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "分享日志"))
+        // chooser 外层也带上读权限 flag：部分接收者（文件管理器/系统 UI）通过
+        // 自己的 Intent 读取 uri 时需要授权，否则报 Permission Denial
+        val chooser = Intent.createChooser(intent, "分享日志").apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(chooser)
         true
     }.getOrElse {
         false
