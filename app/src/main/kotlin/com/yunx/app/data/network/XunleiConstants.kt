@@ -19,6 +19,24 @@ object XunleiConstants {
     const val APP_CLIENT_ID = "Xp6vsxz_7IYVw2BB"
     const val APP_CLIENT_SECRET = "Xp6vsy4tN9toTVdMSpomVdXpRmES"
 
+    /** Android 端身份（captcha_sign 计算用，alist 验证与 MoePal 抓包一致） */
+    const val APP_CLIENT_VERSION = "8.31.0.9726"
+    const val APP_PACKAGE_NAME = "com.xunlei.downloadprovider"
+
+    /** Android 端 captcha 盐（10 个，alist 源码确认，活体验证通过） */
+    val CAPTCHA_SALTS = listOf(
+        "9uJNVj/wLmdwKrJaVj/omlQ",
+        "Oz64Lp0GigmChHMf/6TNfxx7O9PyopcczMsnf",
+        "Eb+L7Ce+Ej48u",
+        "jKY0",
+        "ASr0zCl6v8W4aidjPK5KHd1Lq3t+vBFf41dqv5+fnOd",
+        "wQlozdg6r1qxh0eRmt3QgNXOvSZO6q/GXK",
+        "gmirk+ciAvIgA/cxUUCema47jr/YToixTT+Q6O",
+        "5IiCoM9B1/788ntB",
+        "P07JH0h6qoM6TSUAK2aL9T5s2QBVeY9JWvalf",
+        "+oK0AN"
+    )
+
     /** App UA（官方 app 抓包） */
     const val APP_UA =
         "ANDROID-com.xunlei.downloadprovider/8.31.0.9726 netWorkType/5G appid/40 " +
@@ -40,9 +58,6 @@ object XunleiConstants {
 
     /** 设备指纹（div101.设备ID+SDK指纹，官方 sendsms/smslogin/pan 全链路验证可用） */
     const val DEVICE_SIGN = "div101.78a70629a2b17d0b4302317ffa94807a31491e163e795b39e798ed33ae58858b"
-
-    /** captcha/init 刷新的 captcha_sign（官方抓包值，格式 1.+32hex；服务端主要校验格式） */
-    const val CAPTCHA_SIGN = "1.3a697b29ce15989bfb372702268e70a1"
 
     // ---------- 登录端点 ----------
 

@@ -11,6 +11,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 import kotlin.random.Random
 
 /** 迅雷分享解析结果 */
@@ -477,8 +478,8 @@ class XunleiApi(
             if (!response.isSuccessful || json.has("error")) {
                 val err = json.optString("error")
                 if (err == "captcha_invalid" && attempt == 0) {
-                    // 用请求对应 action + 真实 user_id 重新 init 拿 pan 可用 token（对齐官方；先不带 captcha_sign）
-                    val newToken = initPanCaptcha(deviceId, action, currentUserId)
+                    // 用正确 action + captcha_sign 重新 init（携带旧 token），拿 723 长度有效 token 后重试
+                    val newToken = initPanCaptcha(deviceId, action, token)
                     if (!newToken.isNullOrBlank()) {
                         refreshedCaptcha = newToken
                         token = newToken
@@ -494,23 +495,27 @@ class XunleiApi(
         throw QuarkApiException("验证码刷新后仍失败")
     }
 
-    /** 用请求对应 action + 真实 user_id 初始化 captcha（pan 专用，meta 带设备信息；先不带 captcha_sign） */
-    private suspend fun initPanCaptcha(deviceId: String, action: String, userId: String): String? =
+    /** 用请求对应 action + 正确 captcha_sign 初始化 captcha（pan 专用，alist 算法已验证）。
+     * 算法：raw = client_id+client_version+package_name+device_id+timestamp_ms，10 层 md5(raw+salt)，sign="1."+结果 */
+    private suspend fun initPanCaptcha(deviceId: String, action: String, oldToken: String): String? =
         withContext(Dispatchers.IO) {
+            val ts = System.currentTimeMillis().toString()
+            val sign = buildCaptchaSign(deviceId, ts)
             val body = JSONObject()
-                .put("action", action)
-                .put("captcha_token", "")
                 .put("client_id", XunleiConstants.APP_CLIENT_ID)
+                .put("action", action)
                 .put("device_id", deviceId)
+                .put("redirect_uri", "xlaccsdk01://xunlei.com/callback?state=harbor")
                 .put(
                     "meta",
                     JSONObject()
-                        .put("client_version", "8.31.0.9726")
-                        .put("package_name", "com.xunlei.downloadprovider")
-                        .put("user_id", userId)
-                        .put("timestamp", System.currentTimeMillis().toString())
+                        .put("client_version", XunleiConstants.APP_CLIENT_VERSION)
+                        .put("package_name", XunleiConstants.APP_PACKAGE_NAME)
+                        .put("timestamp", ts)
+                        .put("captcha_sign", sign)
+                        .put("user_id", "")
                 )
-                .put("redirect_uri", "xlaccsdk01://xunlei.com/callback?state=harbor")
+                .put("captcha_token", oldToken)
                 .toString()
             val request = Request.Builder()
                 .url(XunleiConstants.CAPTCHA_INIT_URL)
@@ -529,6 +534,21 @@ class XunleiApi(
                 }
             }.getOrNull()
         }
+
+    /** captcha_sign：client_id+client_version+package_name+device_id+timestamp_ms → 10 层 md5(raw+salt)，前缀 "1." */
+    private fun buildCaptchaSign(deviceId: String, tsMs: String): String {
+        var h = XunleiConstants.APP_CLIENT_ID + XunleiConstants.APP_CLIENT_VERSION +
+            XunleiConstants.APP_PACKAGE_NAME + deviceId + tsMs
+        for (salt in XunleiConstants.CAPTCHA_SALTS) {
+            h = md5Hex(h + salt)
+        }
+        return "1.$h"
+    }
+
+    private fun md5Hex(input: String): String {
+        val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
+    }
 
     companion object {
         /** 设备 ID：复用官方抓包真实设备（devicesign 前半一致，保证设备指纹有效） */
