@@ -178,7 +178,9 @@ class DownloadManager(
         downloader.cancelCalls(id)
         _stats.update { it - id }
         taskHeaders.remove(id)
-        taskCallbacks.remove(id)
+        // 删除任务同样触发清理回调（如删除网盘临时转存文件）：
+        // 用户放弃下载时云盘里已转存的临时文件也应一并清理
+        val cleanup = taskCallbacks.remove(id)
         taskLocks.remove(id)
         val deferred = synchronized(jobsLock) { activeJobs.remove(id) }
         scope.launch {
@@ -192,6 +194,8 @@ class DownloadManager(
             }
             dao.delete(id)
             chunkDirOf(id).deleteRecursively()
+            // 删除任务后清理云盘转存（与下载成功完成同语义）；失败不阻断
+            cleanup?.let { runCatching { it() } }
         }
     }
 

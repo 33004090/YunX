@@ -1,15 +1,16 @@
 package com.yunx.app.data.repository
 
 import com.yunx.app.data.network.BaiduApi
+import com.yunx.app.data.network.BaiduConstants
 import com.yunx.app.data.network.ShareLinkParser
 import com.yunx.app.data.network.model.DownloadLink
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareSession
 
 /**
- * 百度分享解析仓库：verify 拿 sekey → xpan/share 列文件 → 转存根目录 → locatedownload 拿 appall 高速链 → 下载完成后删除转存。
- * 全部基于抓包链路（share/verify → xpan/share list → share/transfer → locatedownload），
- * appall 直链 URL 自带签名，下载完成后由 cleanupPending 删除转存（失败不阻断）。
+ * 百度分享解析仓库：verify 拿 sekey → xpan/share 列文件 → 转存临时目录（自动创建，失败回退根目录）→ locatedownload 拿 appall 高速链 → 立即删除临时转存。
+ * 全部基于抓包链路（share/verify → xpan/share list → share/transfer → locatedownload）。
+ * appall 直链 URL 自带签名、删除转存后仍有效，故取链成功后立即删除临时转存（失败不阻断）。
  */
 class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository {
 
@@ -18,10 +19,6 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
 
     /** surl -> (share_id, uk)，由列表接口返回（转存必需） */
     private val shareInfos = mutableMapOf<String, Pair<String, String>>()
-
-    /** 最近一次转存文件的路径（下载完成后由 cleanupPending 删除） */
-    @Volatile
-    private var pendingCleanupPath: String? = null
 
     override suspend fun createSession(link: String, pwd: String?, cookie: String): Result<ShareSession> =
         runCatching {
@@ -52,9 +49,11 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         )
 
     override suspend fun ensureTempDir(cookie: String): Result<String> = runCatching {
-        // 直接转存到网盘根目录（必然存在），彻底绕开 filemanager 建目录（mkdir 在普通 Cookie 下 errno=2）。
-        // 转存后立即取直链并删除，根目录不留残留。
-        "/"
+        val dir = "/${BaiduConstants.TEMP_DIR_NAME}"
+        // 已存在则直接复用；不存在则创建（web UA 已修正）；创建失败回退根目录（鲁棒性）
+        val exists = runCatching { api.listDir("/", cookie).any { it == dir } }.getOrDefault(false)
+        val ok = exists || api.createDir(dir, cookie)
+        if (ok) dir else "/"
     }.fold(
         onSuccess = { Result.success(it) },
         onFailure = { Result.failure(it) }
@@ -83,7 +82,7 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         onFailure = { Result.failure(it) }
     )
 
-    /** 百度取直链：转存根目录 → locatedownload 拿 appall 高速链（对齐 MoePal）→ 记录待清理路径（下载完成后删除） */
+    /** 百度取直链：转存临时目录（自动创建，失败回退根目录）→ locatedownload 拿 appall 高速链 → 立即删除临时转存（失败不阻断） */
     override suspend fun getShareDownloadLink(
         session: ShareSession,
         file: ShareFile,
@@ -95,9 +94,8 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         // locatedownload 按转存后的完整路径取链，返回 appallNN.baidupcs.com CDN 直链
         // （自带 sign/expires，删除转存后仍有效；仅需 BDUSS + 手机 UA 即可满速下载）
         val dlink = api.locateDownload(transferred.path, cookie)
-        // 双保险：appall 链理论上不依赖转存文件存活，但仍保留"下载完成后删除转存"的清理机制，
-        // 避免根目录残留临时文件
-        pendingCleanupPath = transferred.path
+        // appall 直链不依赖转存文件存活：取链成功后立即删除临时转存，网盘不留残留
+        deleteTransferred(transferred.path, cookie)
         DownloadLink(
             fid = transferred.fsId,
             filename = file.fname,
@@ -109,11 +107,13 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         onFailure = { Result.failure(it) }
     )
 
-    /** 删除最近一次转存的临时文件（下载成功完成后调用；失败不阻断） */
-    suspend fun cleanupPending(cookie: String) {
-        val path = pendingCleanupPath ?: return
-        pendingCleanupPath = null
+    /** 删除转存文件（失败不阻断）；转存在临时目录时，删完文件后尝试删空目录 */
+    private suspend fun deleteTransferred(path: String, cookie: String) {
         runCatching { api.deleteFile(path, cookie) }
+        val tempDir = "/${BaiduConstants.TEMP_DIR_NAME}"
+        if (path.startsWith("$tempDir/")) {
+            runCatching { api.deleteFile(tempDir, cookie) }
+        }
     }
 
     /** 取 share_id/uk：优先用列表接口缓存的，否则先列一次根目录 */

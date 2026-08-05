@@ -179,14 +179,16 @@ class BaiduApi(
     /** 创建目录（个人网盘根目录下），返回是否成功 */
     suspend fun createDir(path: String, cookie: String): Boolean = withContext(Dispatchers.IO) {
         val bdstoken = getBdstoken(cookie) ?: return@withContext false
-        val body = "path=${urlEncode(path)}&isdir=1"
+        // 官方新建文件夹用的是 api/create?a=commit（对齐抓包）：
+        // filemanager?opera=mkdir 在纯 Cookie 认证下恒 errno=2（接口校验路径不同）。
+        // UA 用 netdisk 客户端 + Referer yun.baidu.com/disk/main + body 完整参数
+        val body = "path=${urlEncode(path)}&isdir=1&size&block_list=%5B%5D&method=post&dataType=json"
         val request = Request.Builder()
-            // 创建目录用 opera=mkdir（opera=create 会被拒 errno=2）；对齐官方/BaiduPCS-Go 参数
-            .url("https://pan.baidu.com/api/filemanager?opera=mkdir&async=2&onnest=fail" +
-                "&newVerify=1&bdstoken=$bdstoken&channel=chunlei&clienttype=0&app_id=${BaiduConstants.APP_ID}&web=1")
+            .url("https://pan.baidu.com/api/create?a=commit&channel=chunlei&web=1" +
+                "&app_id=${BaiduConstants.APP_ID}&clienttype=0&bdstoken=$bdstoken")
             .header("Cookie", cookie)
             .header("User-Agent", BaiduConstants.UA_NETDISK)
-            .header("Referer", "https://pan.baidu.com/disk/home")
+            .header("Referer", "https://yun.baidu.com/disk/main")
             .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             .post(body.toRequestBody(formMediaType))
             .build()

@@ -249,13 +249,8 @@ class ResolveViewModel(
             downloadManager.enqueue(
                 url = link.downloadUrl,
                 fileName = link.filename,
-                headers = headers,
-                // 百度：locatedownload 的 appall 链删除转存后仍有效，但仍保留"下载完成后删除转存"的清理机制
-    onComplete = if (isBaidu) {
-                    { baiduResolveRepository.cleanupPending(credential) }
-                } else {
-                    {}
-                }
+                headers = headers
+                // 百度取链时（getShareDownloadLink）已立即删除临时转存，下载环节无需再清理
             )
             downloadStarted = true
         }
