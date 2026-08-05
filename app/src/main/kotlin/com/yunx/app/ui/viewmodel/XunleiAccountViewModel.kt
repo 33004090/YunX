@@ -51,7 +51,7 @@ class XunleiAccountViewModel(
                 val smsStep = repository.sendSms(username.trim())
                 loginStep = smsStep
                 if (smsStep.smsCreditKey.isBlank()) loginError = smsStep.message
-            } else if (step.sessionKey.isNotBlank()) {
+            } else if (step.sessionKey.isNotBlank() && step.sessionId.isNotBlank()) {
                 val ok = repository.finishLogin(step, username.trim())
                 if (!ok) loginError = "登录失败，无法换取凭证"
             } else {

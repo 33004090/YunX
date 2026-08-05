@@ -11,8 +11,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
-import java.util.UUID
 import kotlin.random.Random
 
 /** 迅雷分享解析结果 */
@@ -29,6 +27,7 @@ data class XunleiLoginStep(
     val smsCreditKey: String = "",    // sendsms 返回的 creditkey
     val smsToken: String = "",        // sendsms 返回的 token
     val sessionKey: String = "",      // 登录成功的会话（loginKey）
+    val sessionId: String = "",       // 登录成功的 sessionID（换 token 用 signin_token）
     val nickname: String = "",
     val userID: String = "",
     val message: String = ""
@@ -44,11 +43,11 @@ class XunleiApi(
 ) {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val formMediaType = "application/x-www-form-urlencoded".toMediaType()
 
     // ---------- 登录 ----------
 
-    /** 1. 验证码盾初始化，返回 captcha_token（pan 请求需带 X-Captcha-Token） */
+    /** 1. 验证码盾初始化，返回 captcha_token（换 token 与 pan 请求需带 X-Captcha-Token）。
+     * 官方抓包：client_id 用 app 凭据 Xp6vsxz_7IYVw2BB */
     suspend fun initCaptcha(
         deviceId: String,
         username: String,
@@ -57,12 +56,21 @@ class XunleiApi(
         val body = JSONObject()
             .put("action", action)
             .put("captcha_token", "")
-            .put("client_id", XunleiConstants.CLIENT_ID)
+            .put("client_id", XunleiConstants.APP_CLIENT_ID)
             .put("device_id", deviceId)
             .put("meta", JSONObject().put("username", username))
             .put("redirect_uri", "xlaccsdk01://xunlei.com/callback?state=harbor")
             .toString()
-        val request = authRequest(XunleiConstants.CAPTCHA_INIT_URL, deviceId, body)
+        val request = Request.Builder()
+            .url(XunleiConstants.CAPTCHA_INIT_URL)
+            .header("User-Agent", XunleiConstants.APP_UA)
+            .header("Accept", "application/json;charset=UTF-8")
+            .header("Content-Type", "application/json")
+            .header("X-Client-Id", XunleiConstants.APP_CLIENT_ID)
+            .header("X-Device-Id", deviceId)
+            .header("X-Client-Version", "8.31.0.9726")
+            .post(body.toRequestBody(jsonMediaType))
+            .build()
         runCatching {
             client.newCall(request).execute().use { resp ->
                 val json = JSONObject(resp.body?.string() ?: "{}")
@@ -71,36 +79,46 @@ class XunleiApi(
         }.getOrNull()
     }
 
-    /** 2. 账号密码登录；成功返回 sessionKey（loginKey），否则可能触发短信验证 */
+    /** 2. 账号密码登录（官方首次登录：creditkey=""，sdk UA）。
+     * 新客户端第一次登录必然返回 review_panel(1007) → 走短信验证；不要填任何 creditkey/captcha。 */
     suspend fun loginWithPassword(
         username: String,
         password: String,
         deviceId: String,
-        captchaToken: String,
         checkCode: String = ""
     ): XunleiLoginStep = withContext(Dispatchers.IO) {
-        val body = baseLoginBody(deviceId)
+        val body = baseLoginBody(deviceId, "25.0.5.25", "513006")
             .put("userName", username)
             .put("passWord", password)
             .put("verifyKey", "")
             .put("verifyCode", checkCode)
             .put("isMd5Pwd", "0")
             .toString()
-        val request = authRequest(XunleiConstants.LOGIN_URL, deviceId, body)
+        // 官方抓包 v3/login 头：sdk UA + content-type，无 Cookie，无 x-device-id/x-client-id
+        val request = Request.Builder()
+            .url(XunleiConstants.LOGIN_URL)
+            .header("User-Agent", "android-ok-http-client/xl-acc-sdk/version-5.1.3.513006")
+            .header("Content-Type", "application/json")
+            .post(body.toRequestBody(jsonMediaType))
+            .build()
         client.newCall(request).execute().use { resp ->
             val json = JSONObject(resp.body?.string() ?: "{}")
             parseLoginResponse(json)
         }
     }
 
-    /** 3a. 发送短信验证码 */
+    /** 3a. 发送短信验证码（官方：UA=xl-acc-sdk/version-5.0.12.512000，creditkey=""，无 Cookie） */
     suspend fun sendSms(mobile: String, deviceId: String): XunleiLoginStep = withContext(Dispatchers.IO) {
-        val body = baseLoginBody(deviceId)
-            .put("creditkey", "")
+        val body = baseLoginBody(deviceId, "8.31.0.9726", "231500")
             .put("mobile", mobile)
             .put("register", "0")
             .toString()
-        val request = authRequest(XunleiConstants.SEND_SMS_URL, deviceId, body)
+        val request = Request.Builder()
+            .url(XunleiConstants.SEND_SMS_URL)
+            .header("User-Agent", "android-ok-http-client/xl-acc-sdk/version-5.0.12.512000")
+            .header("Content-Type", "application/json")
+            .post(body.toRequestBody(jsonMediaType))
+            .build()
         client.newCall(request).execute().use { resp ->
             val json = JSONObject(resp.body?.string() ?: "{}")
             XunleiLoginStep(
@@ -112,7 +130,7 @@ class XunleiApi(
         }
     }
 
-    /** 3b. 短信验证码登录，返回 loginKey（用于换 token） */
+    /** 3b. 短信验证码登录（官方：UA=xl-acc-sdk/version-5.0.12.512000，body 带 creditkey/token，无 Cookie） */
     suspend fun smsLogin(
         mobile: String,
         smsCode: String,
@@ -120,35 +138,54 @@ class XunleiApi(
         smsToken: String,
         deviceId: String
     ): XunleiLoginStep = withContext(Dispatchers.IO) {
-        val body = baseLoginBody(deviceId)
-            .put("creditkey", creditKey)
+        val body = baseLoginBody(deviceId, "8.31.0.9726", "231500", creditKey)
             .put("mobile", mobile)
             .put("smsCode", smsCode)
             .put("token", smsToken)
             .put("register", "0")
             .toString()
-        val request = authRequest(XunleiConstants.SMS_LOGIN_URL, deviceId, body)
+        val request = Request.Builder()
+            .url(XunleiConstants.SMS_LOGIN_URL)
+            .header("User-Agent", "android-ok-http-client/xl-acc-sdk/version-5.0.12.512000")
+            .header("Content-Type", "application/json")
+            .post(body.toRequestBody(jsonMediaType))
+            .build()
         client.newCall(request).execute().use { resp ->
             val json = JSONObject(resp.body?.string() ?: "{}")
             parseLoginResponse(json)
         }
     }
 
-    /** 4. 用会话（loginKey/sessionKey）换取 access_token（文档 OAuth2 token 接口） */
-    suspend fun exchangeToken(sessionKey: String, deviceId: String): Pair<String, String>? = withContext(Dispatchers.IO) {
-        val form = buildString {
-            append("grant_type=token")
-            append("&client_id=").append(XunleiConstants.CLIENT_ID)
-            append("&client_secret=").append(XunleiConstants.CLIENT_SECRET)
-            append("&sessionKey=").append(java.net.URLEncoder.encode(sessionKey, "UTF-8"))
-            append("&device_id=").append(deviceId)
-        }
-        val request = Request.Builder()
+    /** 兜底：OAuth2 密码直换 token（官方抓包证实此路径不存在，v3/login + signin_token 才是正路） */
+    suspend fun loginWithTokenPassword(
+        username: String,
+        password: String,
+        deviceId: String,
+        captchaToken: String,
+        checkCode: String = ""
+    ): Pair<String, String>? = null
+
+    /** 4. 用 v3/smslogin 返回的 sessionID 换取 access_token（官方抓包 POST /v1/auth/signin/token）。
+     * body：{"client_id":"Xp6vsxz_7IYVw2BB","client_secret":"Xp6vsy4tN9toTVdMSpomVdXpRmES",
+     *        "provider":"access_end_point_token","signin_token":"<sessionID>"}
+     * 请求头必须带 X-Captcha-Token（captcha/init 返回）。 */
+    suspend fun exchangeToken(sessionId: String, deviceId: String, captchaToken: String): Pair<String, String>? = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("client_id", XunleiConstants.APP_CLIENT_ID)
+            .put("client_secret", XunleiConstants.APP_CLIENT_SECRET)
+            .put("provider", "access_end_point_token")
+            .put("signin_token", sessionId)
+            .toString()
+        val builder = Request.Builder()
             .url(XunleiConstants.TOKEN_URL)
             .header("User-Agent", XunleiConstants.APP_UA)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .post(form.toRequestBody(formMediaType))
-            .build()
+            .header("Accept", "application/json;charset=UTF-8")
+            .header("Content-Type", "application/json")
+            .header("X-Client-Id", XunleiConstants.APP_CLIENT_ID)
+            .header("X-Device-Id", deviceId)
+            .header("X-Client-Version", "8.31.0.9726")
+        if (captchaToken.isNotBlank()) builder.header("X-Captcha-Token", captchaToken)
+        val request = builder.post(body.toRequestBody(jsonMediaType)).build()
         runCatching {
             client.newCall(request).execute().use { resp ->
                 val json = JSONObject(resp.body?.string() ?: "{}")
@@ -166,6 +203,7 @@ class XunleiApi(
             return XunleiLoginStep(
                 needSms = false,
                 sessionKey = json.optString("loginKey"),
+                sessionId = json.optString("sessionID"),
                 nickname = json.optString("nickName"),
                 userID = json.optString("userID"),
                 message = "登录成功"
@@ -181,24 +219,29 @@ class XunleiApi(
         )
     }
 
-    /** 登录请求公共体（对齐官方 app 抓包字段） */
-    private fun baseLoginBody(deviceId: String): JSONObject = JSONObject()
+    /** 登录请求公共体（对齐官方 app 抓包字段；peerID/devicesign 用官方真实设备标识） */
+    private fun baseLoginBody(
+        deviceId: String,
+        clientVersion: String,
+        sdkVersion: String,
+        creditKey: String = ""
+    ): JSONObject = JSONObject()
         .put("protocolVersion", "301")
         .put("sequenceNo", Random.nextLong(10000000, 99999999).toString())
         .put("platformVersion", "10")
         .put("isCompressed", "0")
         .put("appid", "40")
-        .put("clientVersion", "8.31.0.9726")
-        .put("peerID", randomHex(32))
+        .put("clientVersion", clientVersion)
+        .put("peerID", XunleiConstants.PEER_ID) // 官方真实 peerID
         .put("appName", "ANDROID-com.xunlei.downloadprovider")
-        .put("sdkVersion", "512000")
-        .put("devicesign", buildDeviceSign(deviceId))
+        .put("sdkVersion", sdkVersion)
+        .put("devicesign", XunleiConstants.DEVICE_SIGN) // 官方真实设备指纹
         .put("netWorkType", "WIFI")
         .put("providerName", "NONE")
         .put("deviceModel", "M2004J7AC")
         .put("deviceName", "Xiaomi_M2004j7ac")
         .put("OSVersion", "12")
-        .put("creditkey", "")
+        .put("creditkey", creditKey)
         .put("hl", "zh-CN")
 
     // ---------- Pan ----------
@@ -365,18 +408,6 @@ class XunleiApi(
         }
     }
 
-    /** 登录类请求（xluser，普通 JSON + UA） */
-    private fun authRequest(url: String, deviceId: String, body: String): Request =
-        Request.Builder()
-            .url(url)
-            .header("User-Agent", XunleiConstants.APP_UA)
-            .header("Content-Type", "application/json")
-            .header("X-Client-Id", XunleiConstants.CLIENT_ID)
-            .header("X-Device-Id", deviceId)
-            .header("X-Client-Version", "8.31.0.9726")
-            .post(body.toRequestBody(jsonMediaType))
-            .build()
-
     /** pan 请求（Bearer + 设备 + captcha 头，抓包确认无 x-signature） */
     private fun panRequest(
         url: String,
@@ -390,8 +421,6 @@ class XunleiApi(
             .header("User-Agent", XunleiConstants.WEB_UA)
             .header("Authorization", "Bearer $accessToken")
             .header("X-Device-Id", deviceId)
-            .header("X-Client-Id", XunleiConstants.CLIENT_ID)
-            .header("client_id", XunleiConstants.CLIENT_ID)
             .header("X-Client-Version", "8.31.0.9726")
             .header("Content-Type", "application/json")
             .header("Origin", "https://pan.xunlei.com")
@@ -416,19 +445,8 @@ class XunleiApi(
         return parser(json.optJSONObject("data") ?: json)
     }
 
-    private fun buildDeviceSign(deviceId: String): String =
-        "div101.$deviceId${md5(deviceId)}"
-
-    private fun md5(input: String): String {
-        val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
-    }
-
-    private fun randomHex(len: Int): String = buildString {
-        repeat(len) { append("0123456789abcdef"[Random.nextInt(16)]) }
-    }
-
     companion object {
-        fun newDeviceId(): String = UUID.randomUUID().toString().replace("-", "")
+        /** 设备 ID：复用官方抓包真实设备（devicesign 前半一致，保证设备指纹有效） */
+        fun newDeviceId(): String = XunleiConstants.DEVICE_ID
     }
 }

@@ -3,7 +3,6 @@ package com.yunx.app.data.repository
 import com.yunx.app.data.db.XunleiAccountDao
 import com.yunx.app.data.db.XunleiAccountEntity
 import com.yunx.app.data.network.XunleiApi
-import com.yunx.app.data.network.XunleiConstants
 import com.yunx.app.data.network.XunleiLoginStep
 import kotlinx.coroutines.flow.Flow
 
@@ -24,15 +23,15 @@ class XunleiAccountRepository(
         username: String,
         password: String
     ): XunleiLoginStep {
-        val account = dao.getAccount()
-        val deviceId = account?.deviceId ?: XunleiApi.newDeviceId()
-        val captchaToken = api.initCaptcha(deviceId, username) ?: ""
-        return api.loginWithPassword(username, password, deviceId, captchaToken)
+        // 必须用官方真实设备 ID（devicesign 配套），否则 userinfo_expired
+        val deviceId = XunleiApi.newDeviceId()
+        // 官方首次登录：v3/login 不带任何 creditkey/captcha，返回 review_panel(1007) 触发短信验证
+        return api.loginWithPassword(username, password, deviceId)
     }
 
     /** 发送短信验证码（登录触发 review_panel 后调用） */
     suspend fun sendSms(mobile: String): XunleiLoginStep {
-        val deviceId = dao.getAccount()?.deviceId ?: XunleiApi.newDeviceId()
+        val deviceId = XunleiApi.newDeviceId()
         return api.sendSms(mobile, deviceId)
     }
 
@@ -43,11 +42,12 @@ class XunleiAccountRepository(
         creditKey: String,
         smsToken: String
     ): Boolean {
-        val deviceId = dao.getAccount()?.deviceId ?: XunleiApi.newDeviceId()
+        val deviceId = XunleiApi.newDeviceId()
         val step = api.smsLogin(mobile, smsCode, creditKey, smsToken, deviceId)
-        if (step.sessionKey.isBlank()) return false
-        val tokens = api.exchangeToken(step.sessionKey, deviceId) ?: return false
+        if (step.sessionId.isBlank()) return false
+        // 换 token 前先 initCaptcha 拿 captcha_token（官方时序：smslogin → captcha/init → signin/token）
         val captchaToken = api.initCaptcha(deviceId, mobile) ?: ""
+        val tokens = api.exchangeToken(step.sessionId, deviceId, captchaToken) ?: return false
         dao.upsert(
             XunleiAccountEntity(
                 id = "xunlei",
@@ -61,15 +61,15 @@ class XunleiAccountRepository(
         return true
     }
 
-    /** 密码登录成功后直接换 token 落库 */
+    /** 密码登录成功后用 sessionID 换 token 落库 */
     suspend fun finishLogin(
         step: XunleiLoginStep,
         username: String
     ): Boolean {
-        if (step.sessionKey.isBlank()) return false
-        val deviceId = dao.getAccount()?.deviceId ?: XunleiApi.newDeviceId()
-        val tokens = api.exchangeToken(step.sessionKey, deviceId) ?: return false
+        if (step.sessionId.isBlank()) return false
+        val deviceId = XunleiApi.newDeviceId()
         val captchaToken = api.initCaptcha(deviceId, username) ?: ""
+        val tokens = api.exchangeToken(step.sessionId, deviceId, captchaToken) ?: return false
         dao.upsert(
             XunleiAccountEntity(
                 id = "xunlei",
