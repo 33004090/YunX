@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 共享路径：导出日志等场景使用 -->
+<paths>
+    <!-- 内部缓存目录：cacheDir/logs -->
+    <cache-path name="cache_logs" path="logs/" />
+    <!-- 崩溃日志目录：filesDir/crash -->
+    <files-path name="files_crash" path="crash/" />
+</paths>

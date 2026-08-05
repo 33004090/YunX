@@ -1,5 +1,6 @@
 package com.yunx.app.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Info
@@ -30,13 +32,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.yunx.app.util.LogExporter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 可选的下载线程数 */
 private val threadOptions = listOf(1, 2, 4, 8, 16, 32)
@@ -56,6 +64,8 @@ fun SettingsScreen(
     // 本地状态：修改后立即刷新 UI，同时同步外部保存值
     var threads by remember { mutableStateOf(downloadThreads) }
     LaunchedEffect(downloadThreads) { threads = downloadThreads }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = modifier
@@ -81,6 +91,23 @@ fun SettingsScreen(
             description = "触发一次异常，验证全局崩溃捕获",
             onClick = {
                 throw RuntimeException("手动触发的崩溃测试")
+            }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsItem(
+            icon = Icons.Outlined.Article,
+            title = "导出日志",
+            description = "导出崩溃日志与应用信息，便于排查问题",
+            onClick = {
+                scope.launch {
+                    val file = withContext(Dispatchers.IO) { LogExporter.export(context) }
+                    if (file != null && LogExporter.share(context, file)) {
+                        Toast.makeText(context, "日志已导出", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "导出日志失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         )
 
