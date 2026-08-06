@@ -54,6 +54,7 @@ import com.yunx.app.ui.navigation.MainTab
 import com.yunx.app.ui.screens.AboutScreen
 import com.yunx.app.ui.screens.DownloadScreen
 import com.yunx.app.ui.screens.DriveScreen
+import com.yunx.app.ui.screens.OnboardingScreen
 import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
 import com.yunx.app.ui.viewmodel.BaiduAccountViewModel
@@ -85,6 +86,12 @@ fun MainScreen() {
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
+    // 首次启动引导页（context 声明后检测）
+    var showOnboarding by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("yunx_prefs", android.content.Context.MODE_PRIVATE)
+        showOnboarding = !prefs.getBoolean("onboarding_shown", false)
+    }
     val api = remember { QuarkApi() }
     val ucApi = remember { UCApi() }
     val xunleiApi = remember { XunleiApi() }
@@ -177,6 +184,20 @@ fun MainScreen() {
         }
     }
 
+    // 首次启动引导页：全屏覆盖（优先级最高）
+    if (showOnboarding) {
+        OnboardingScreen(
+            onFinish = {
+                context.getSharedPreferences("yunx_prefs", android.content.Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("onboarding_shown", true)
+                    .apply()
+                showOnboarding = false
+            }
+        )
+        return
+    }
+
     // 夸克登录页：全屏覆盖
     if (showQuarkLogin) {
         QuarkLoginScreen(
@@ -229,7 +250,18 @@ fun MainScreen() {
 
     // 关于云析：全屏覆盖
     if (showAbout) {
-        AboutScreen(onBack = { showAbout = false })
+        AboutScreen(
+            onBack = { showAbout = false },
+            onPreviewOnboarding = {
+                // 重置引导标记并重新展示欢迎界面
+                context.getSharedPreferences("yunx_prefs", android.content.Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("onboarding_shown", false)
+                    .apply()
+                showAbout = false
+                showOnboarding = true
+            }
+        )
         return
     }
 

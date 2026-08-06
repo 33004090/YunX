@@ -86,8 +86,9 @@ fun ResolveScreen(
     var pwdEdited by rememberSaveable { mutableStateOf(false) }
 
     // 剪贴板分享链接提示状态：待提示的剪贴板文本 + 已忽略的文本
-    var clipboardSuggestion by remember { mutableStateOf<String?>(null) }
-    var ignoredClipboard by remember { mutableStateOf<String?>(null) }
+    // 用 rememberSaveable：切换 Tab 后返回仍保留（避免「忽略后切页回来又弹」）
+    var clipboardSuggestion by rememberSaveable { mutableStateOf<String?>(null) }
+    var ignoredClipboard by rememberSaveable { mutableStateOf<String?>(null) }
 
     // 检测函数：读取剪贴板，满足条件则设置提示（三重触发：组合时 / ON_RESUME / 剪贴板变化）
     val maybeSuggestClipboard: () -> Unit = {
