@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.BaiduConstants
+import com.yunx.app.data.network.C139Constants
 import com.yunx.app.data.network.QuarkConstants
 import com.yunx.app.data.network.ShareLinkParser
 import com.yunx.app.data.network.SharePlatform
@@ -18,6 +19,8 @@ import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareSession
 import com.yunx.app.data.repository.BaiduAccountRepository
 import com.yunx.app.data.repository.BaiduResolveRepository
+import com.yunx.app.data.repository.C139AccountRepository
+import com.yunx.app.data.repository.C139ResolveRepository
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
 import com.yunx.app.data.repository.ShareResolveRepository
@@ -47,6 +50,8 @@ class ResolveViewModel(
     private val xunleiResolveRepository: XunleiResolveRepository,
     private val baiduAccountRepository: BaiduAccountRepository,
     private val baiduResolveRepository: BaiduResolveRepository,
+    private val c139AccountRepository: C139AccountRepository,
+    private val c139ResolveRepository: C139ResolveRepository,
     private val downloadManager: DownloadManager
 ) : ViewModel() {
 
@@ -86,11 +91,12 @@ class ResolveViewModel(
     /** 当前解析平台（QUARK / UC / XUNLEI），由链接自动检测 */
     private var currentPlatform: SharePlatform = SharePlatform.QUARK
 
-    /** 当前平台凭证（夸克/UC/百度用 cookie，迅雷用 access_token） */
+    /** 当前平台凭证（夸克/UC/百度用 cookie，迅雷用 access_token，139 用 cookie） */
     private suspend fun currentCredential(): String? = when (currentPlatform) {
         SharePlatform.UC -> ucAccountRepository.getAccount()?.cookie
         SharePlatform.XUNLEI -> xunleiAccountRepository.getAccount()?.accessToken
         SharePlatform.BAIDU -> baiduAccountRepository.getAccount()?.cookie
+        SharePlatform.C139 -> c139AccountRepository.getAccount()?.cookie
         else -> accountRepository.getAccount()?.cookie
     }
 
@@ -98,6 +104,7 @@ class ResolveViewModel(
         SharePlatform.UC -> ucResolveRepository
         SharePlatform.XUNLEI -> xunleiResolveRepository
         SharePlatform.BAIDU -> baiduResolveRepository
+        SharePlatform.C139 -> c139ResolveRepository
         else -> resolveRepository
     }
 
@@ -105,6 +112,7 @@ class ResolveViewModel(
         SharePlatform.UC -> UCConstants.DEFAULT_PDIR_FID
         SharePlatform.XUNLEI -> "0"
         SharePlatform.BAIDU -> ""
+        SharePlatform.C139 -> "0"
         else -> QuarkConstants.DEFAULT_PDIR_FID
     }
 
@@ -112,6 +120,7 @@ class ResolveViewModel(
         SharePlatform.UC -> "UC 网盘"
         SharePlatform.XUNLEI -> "迅雷网盘"
         SharePlatform.BAIDU -> "百度网盘"
+        SharePlatform.C139 -> "139 网盘"
         else -> "夸克网盘"
     }
 
@@ -229,18 +238,20 @@ class ResolveViewModel(
             val isUC = currentPlatform == SharePlatform.UC
             val isXunlei = currentPlatform == SharePlatform.XUNLEI
             val isBaidu = currentPlatform == SharePlatform.BAIDU
+            val isC139 = currentPlatform == SharePlatform.C139
             val credential = currentCredential()
             if (credential.isNullOrBlank()) {
                 downloadError = "请先登录网盘"
                 return@launch
             }
-            // 迅雷直链 URL 自带签名，无需 Cookie；夸克/UC/百度需 Cookie + UA
+            // 迅雷直链 URL 自带签名，无需 Cookie；夸克/UC/百度需 Cookie + UA；139 直链为 CDN 签名地址
             val headers = when {
                 isXunlei -> mapOf("User-Agent" to XunleiConstants.WEB_UA)
                 isBaidu -> mapOf(
                     "Cookie" to credential,
                     "User-Agent" to BaiduConstants.UA_NETDISK
                 )
+                isC139 -> mapOf("User-Agent" to C139Constants.PC_UA)
                 else -> mapOf(
                     "Cookie" to credential,
                     "User-Agent" to if (isUC) UCConstants.USER_AGENT else QuarkConstants.API_USER_AGENT
@@ -280,6 +291,8 @@ class ResolveViewModel(
         private val xunleiResolveRepository: XunleiResolveRepository,
         private val baiduAccountRepository: BaiduAccountRepository,
         private val baiduResolveRepository: BaiduResolveRepository,
+        private val c139AccountRepository: C139AccountRepository,
+        private val c139ResolveRepository: C139ResolveRepository,
         private val downloadManager: DownloadManager
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -290,6 +303,7 @@ class ResolveViewModel(
                 ucAccountRepository, ucResolveRepository,
                 xunleiAccountRepository, xunleiResolveRepository,
                 baiduAccountRepository, baiduResolveRepository,
+                c139AccountRepository, c139ResolveRepository,
                 downloadManager
             ) as T
         }

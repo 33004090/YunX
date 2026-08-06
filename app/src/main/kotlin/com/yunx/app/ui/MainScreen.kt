@@ -30,12 +30,15 @@ import com.yunx.app.data.db.AppDatabase
 import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.BaiduApi
+import com.yunx.app.data.network.C139Api
 import com.yunx.app.data.network.QuarkApi
 import com.yunx.app.data.network.UCApi
 import com.yunx.app.data.network.XunleiApi
 import com.yunx.app.data.prefs.SettingsRepository
 import com.yunx.app.data.repository.BaiduAccountRepository
 import com.yunx.app.data.repository.BaiduResolveRepository
+import com.yunx.app.data.repository.C139AccountRepository
+import com.yunx.app.data.repository.C139ResolveRepository
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
 import com.yunx.app.data.repository.UCAccountRepository
@@ -43,6 +46,7 @@ import com.yunx.app.data.repository.UCResolveRepository
 import com.yunx.app.data.repository.XunleiAccountRepository
 import com.yunx.app.data.repository.XunleiResolveRepository
 import com.yunx.app.ui.login.BaiduLoginScreen
+import com.yunx.app.ui.login.C139LoginScreen
 import com.yunx.app.ui.login.QuarkLoginScreen
 import com.yunx.app.ui.login.UCLoginScreen
 import com.yunx.app.ui.login.XunleiLoginScreen
@@ -52,6 +56,7 @@ import com.yunx.app.ui.screens.DriveScreen
 import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
 import com.yunx.app.ui.viewmodel.BaiduAccountViewModel
+import com.yunx.app.ui.viewmodel.C139AccountViewModel
 import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
@@ -74,6 +79,7 @@ fun MainScreen() {
     var showUCLogin by rememberSaveable { mutableStateOf(false) }
     var showXunleiLogin by rememberSaveable { mutableStateOf(false) }
     var showBaiduLogin by rememberSaveable { mutableStateOf(false) }
+    var showC139Login by rememberSaveable { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
@@ -94,6 +100,9 @@ fun MainScreen() {
     }
     val baiduRepository = remember {
         BaiduAccountRepository(db.baiduAccountDao(), baiduApi)
+    }
+    val c139Repository = remember {
+        C139AccountRepository(db.c139AccountDao())
     }
     // 下载管理器：OkHttp 分片下载器 + Room 任务持久化 + 可配置线程数（设置页动态生效）
     val downloadManager = remember {
@@ -116,6 +125,9 @@ fun MainScreen() {
     val baiduViewModel: BaiduAccountViewModel = viewModel(
         factory = BaiduAccountViewModel.Factory(baiduRepository)
     )
+    val c139ViewModel: C139AccountViewModel = viewModel(
+        factory = C139AccountViewModel.Factory(c139Repository)
+    )
     val xunleiResolveRepository = remember {
         XunleiResolveRepository(
             api = xunleiApi,
@@ -127,6 +139,10 @@ fun MainScreen() {
     val baiduResolveRepository = remember {
         BaiduResolveRepository(baiduApi)
     }
+    val c139Api = remember { C139Api() }
+    val c139ResolveRepository = remember {
+        C139ResolveRepository(c139Api)
+    }
     val resolveViewModel: ResolveViewModel = viewModel(
         factory = ResolveViewModel.Factory(
             repository,
@@ -137,6 +153,8 @@ fun MainScreen() {
             xunleiResolveRepository,
             baiduRepository,
             baiduResolveRepository,
+            c139Repository,
+            c139ResolveRepository,
             downloadManager
         )
     )
@@ -147,6 +165,7 @@ fun MainScreen() {
     val ucAccount by ucViewModel.ucAccount.collectAsState()
     val xunleiAccount by xunleiViewModel.xunleiAccount.collectAsState()
     val baiduAccount by baiduViewModel.baiduAccount.collectAsState()
+    val c139Account by c139ViewModel.c139Account.collectAsState()
 
     // 解析页发起下载后，自动切换到「下载」Tab
     LaunchedEffect(resolveViewModel.downloadStarted) {
@@ -192,6 +211,16 @@ fun MainScreen() {
             viewModel = baiduViewModel,
             onBack = { showBaiduLogin = false },
             onSaved = { showBaiduLogin = false }
+        )
+        return
+    }
+
+    // 139 登录页：全屏覆盖（WebView 登录提取 Cookie）
+    if (showC139Login) {
+        C139LoginScreen(
+            viewModel = c139ViewModel,
+            onBack = { showC139Login = false },
+            onSaved = { showC139Login = false }
         )
         return
     }
@@ -251,6 +280,7 @@ fun MainScreen() {
                         ucAccount = ucAccount,
                         xunleiAccount = xunleiAccount,
                         baiduAccount = baiduAccount,
+                        c139Account = c139Account,
                         onQuarkLogin = { showQuarkLogin = true },
                         onQuarkLogout = { viewModel.logout() },
                         onUCLogin = { showUCLogin = true },
@@ -258,7 +288,9 @@ fun MainScreen() {
                         onXunleiLogin = { showXunleiLogin = true },
                         onXunleiLogout = { xunleiViewModel.logout() },
                         onBaiduLogin = { showBaiduLogin = true },
-                        onBaiduLogout = { baiduViewModel.logout() }
+                        onBaiduLogout = { baiduViewModel.logout() },
+                        onC139Login = { showC139Login = true },
+                        onC139Logout = { c139ViewModel.logout() }
                     )
                     MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
                     MainTab.Settings -> SettingsScreen(

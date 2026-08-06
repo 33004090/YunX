@@ -34,6 +34,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.db.BaiduAccountEntity
+import com.yunx.app.data.db.C139AccountEntity
 import com.yunx.app.data.db.QuarkAccountEntity
 import com.yunx.app.data.db.UCAccountEntity
 import com.yunx.app.data.db.XunleiAccountEntity
@@ -63,6 +64,7 @@ fun DriveScreen(
     ucAccount: UCAccountEntity?,
     xunleiAccount: XunleiAccountEntity?,
     baiduAccount: BaiduAccountEntity?,
+    c139Account: C139AccountEntity?,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
     onUCLogin: () -> Unit,
@@ -71,12 +73,15 @@ fun DriveScreen(
     onXunleiLogout: () -> Unit,
     onBaiduLogin: () -> Unit,
     onBaiduLogout: () -> Unit,
+    onC139Login: () -> Unit,
+    onC139Logout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showQuarkSheet by remember { mutableStateOf(false) }
     var showUCSheet by remember { mutableStateOf(false) }
     var showXunleiSheet by remember { mutableStateOf(false) }
     var showBaiduSheet by remember { mutableStateOf(false) }
+    var showC139Sheet by remember { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
@@ -106,6 +111,13 @@ fun DriveScreen(
         description = baiduAccount?.nickname ?: "点击登录，支持解析下载",
         avatarText = "度",
         isLoggedIn = baiduAccount != null
+    )
+    val c139 = DriveAccount(
+        id = "c139",
+        name = "139网盘",
+        description = c139Account?.nickname ?: "点击登录，支持解析下载",
+        avatarText = "139",
+        isLoggedIn = c139Account != null
     )
     val others = remember {
         emptyList<DriveAccount>()
@@ -166,6 +178,16 @@ fun DriveScreen(
                 }
             )
         }
+        item(key = c139.id) {
+            DriveAccountCard(
+                account = c139,
+                onClick = if (c139.isLoggedIn) {
+                    { showC139Sheet = true }
+                } else {
+                    onC139Login
+                }
+            )
+        }
         items(others, key = { it.id }) { account ->
             DriveAccountCard(account = account)
         }
@@ -216,6 +238,18 @@ fun DriveScreen(
                 showBaiduSheet = false
             },
             onDismiss = { showBaiduSheet = false }
+        )
+    }
+
+    // 已登录 139：点击卡片弹出账号信息底部弹窗
+    if (showC139Sheet && c139Account != null) {
+        C139AccountSheet(
+            account = c139Account,
+            onLogout = {
+                onC139Logout()
+                showC139Sheet = false
+            },
+            onDismiss = { showC139Sheet = false }
         )
     }
 }
