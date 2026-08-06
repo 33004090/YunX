@@ -124,6 +124,27 @@ class C139Api(
     // ---------- 分享解析（§15，7.13+ 加密） ----------
 
     /**
+     * 分享标题：getOutLinkGeneral（匿名，§2.3）→ data.getOutLinkGeneralResp.outLinkGeneral[].lkName；
+     * 失败返回 null。
+     */
+    suspend fun getOutLinkTitle(linkId: String): String? = withContext(Dispatchers.IO) {
+        val req = JSONObject()
+            .put("linkID", linkId)
+            .put("isPasswd", 1)
+            .put("account", "")
+        val plain = JSONObject().put("getOutLinkGeneralReq", req).toString()
+        val respJson = sharePostAnonymous(C139Constants.SHARE_GENERAL_URL, plain)
+        val resultCode = respJson.optString("resultCode")
+        if (resultCode.isNotBlank() && resultCode != "0") return@withContext null
+        if (!respJson.optBoolean("success", true)) return@withContext null
+        val data = respJson.optJSONObject("data")
+            ?.optJSONObject("getOutLinkGeneralResp") ?: return@withContext null
+        val array = data.optJSONArray("outLinkGeneral") ?: return@withContext null
+        if (array.length() == 0) return@withContext null
+        array.optJSONObject(0)?.optString("lkName")?.takeIf { it.isNotBlank() }
+    }
+
+    /**
      * 分享列目录：getOutLinkInfoV6 —— 官方为「匿名」调用（§9530修复文档 §2/§3）：
      * 不带 authorization、不带 mcloud-sign、不带 mcloud-* 头；body account 固定空串；
      * 带完整字段（caSrt/coSrt/srtDr/bNum/eNum），否则 9530；passwd 填错返回 9188。

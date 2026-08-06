@@ -21,8 +21,10 @@ class C139ResolveRepository(private val api: C139Api) : ShareResolveRepository {
             return Result.failure(IllegalStateException("登录态缺少账号信息，请重新登录"))
         }
         return runCatching {
-            // 139 分享无 token：shareId 即 linkID，stoken 暂存提取码
-            ShareSession(parsed.shareId, pwd.orEmpty(), parsed.shareId)
+            // 139 分享无 token：shareId 即 linkID，stoken 暂存提取码；标题从 getOutLinkGeneral 拿（失败回退短链 ID）
+            val title = api.getOutLinkTitle(parsed.shareId)
+                ?.takeIf { it.isNotBlank() } ?: parsed.shareId
+            ShareSession(parsed.shareId, pwd.orEmpty(), title)
         }.fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(it) }
@@ -64,8 +66,10 @@ class C139ResolveRepository(private val api: C139Api) : ShareResolveRepository {
         val account = C139Constants.extractAccountFull(cookie)
             ?: throw IllegalStateException("登录态缺少账号信息，请重新登录")
         val authorization = C139Constants.extractAuthorization(cookie)
-        api.getShareDownloadLink(file.fid, session.shareId, account, authorization)
+        val link = api.getShareDownloadLink(file.fid, session.shareId, account, authorization)
             ?: throw IllegalStateException("获取下载链接失败")
+        // 文件名用列表里的 coName（dlFromOutLinkV3 响应不含文件名，否则会 fallback 成 coID 乱码）
+        link.copy(filename = file.fname.ifBlank { link.filename })
     }.fold(
         onSuccess = { Result.success(it) },
         onFailure = { Result.failure(it) }

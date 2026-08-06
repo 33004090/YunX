@@ -51,6 +51,7 @@ import com.yunx.app.ui.login.QuarkLoginScreen
 import com.yunx.app.ui.login.UCLoginScreen
 import com.yunx.app.ui.login.XunleiLoginScreen
 import com.yunx.app.ui.navigation.MainTab
+import com.yunx.app.ui.screens.AboutScreen
 import com.yunx.app.ui.screens.DownloadScreen
 import com.yunx.app.ui.screens.DriveScreen
 import com.yunx.app.ui.screens.ResolveScreen
@@ -80,6 +81,7 @@ fun MainScreen() {
     var showXunleiLogin by rememberSaveable { mutableStateOf(false) }
     var showBaiduLogin by rememberSaveable { mutableStateOf(false) }
     var showC139Login by rememberSaveable { mutableStateOf(false) }
+    var showAbout by rememberSaveable { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
@@ -225,6 +227,12 @@ fun MainScreen() {
         return
     }
 
+    // 关于云析：全屏覆盖
+    if (showAbout) {
+        AboutScreen(onBack = { showAbout = false })
+        return
+    }
+
     // 折叠标题状态提升到本层：跨页面共享，页面切换时折叠/展开状态保持不变
     val topAppBarState = rememberTopAppBarState()
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(topAppBarState)
@@ -296,7 +304,8 @@ fun MainScreen() {
                     MainTab.Settings -> SettingsScreen(
                         scrollBehavior = scrollBehavior,
                         downloadThreads = settings.downloadThreads,
-                        onThreadsChange = { settings.downloadThreads = it }
+                        onThreadsChange = { settings.downloadThreads = it },
+                        onAboutClick = { showAbout = true }
                     )
                 }
             }

@@ -58,6 +58,7 @@ fun SettingsScreen(
     scrollBehavior: TopAppBarScrollBehavior,
     downloadThreads: Int,
     onThreadsChange: (Int) -> Unit,
+    onAboutClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showThreadsDialog by remember { mutableStateOf(false) }
@@ -109,8 +110,8 @@ fun SettingsScreen(
         SettingsItem(
             icon = Icons.Outlined.Info,
             title = "关于云析",
-            description = "网盘链接解析与下载工具",
-            onClick = {}
+            description = "版本信息、支持平台与技术说明",
+            onClick = onAboutClick
         )
     }
 

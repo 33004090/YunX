@@ -34,6 +34,9 @@ object C139Constants {
     /** 分享取直链（§8/§15 share 类型；7.13+ 请求/响应加密，§14） */
     const val SHARE_LINK_URL = "$SHARE_BASE/yun-share/richlifeApp/devapp/IOutLink/dlFromOutLinkV3"
 
+    /** 分享标题信息（getOutLinkGeneral → outLinkGeneral[].lkName） */
+    const val SHARE_GENERAL_URL = "$SHARE_BASE/yun-share/richlifeApp/devapp/IOutLink/getOutLinkGeneral"
+
     /** §14 分享接口 AES-CBC 固定密钥（16 字节，所有账号共用） */
     const val SHARE_AES_KEY = "PVGDwmcvfs1uV3d1"
 

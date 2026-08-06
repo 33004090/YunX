@@ -106,7 +106,11 @@ fun ResolveScreen(
                     pwd = it
                     pwdEdited = true
                 },
-                onClearLink = { link = "" },
+                onClearLink = {
+                    link = ""
+                    pwd = ""
+                    pwdEdited = false
+                },
                 onClearPwd = { pwd = "" }
             )
         }
