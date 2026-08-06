@@ -1,13 +1,18 @@
 package com.yunx.app.util
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStreamReader
+import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
@@ -29,12 +34,46 @@ object LogExporter {
     /** 单缓冲区最多保留的行数（防止超大 buffer 导致内存/文件过大） */
     private const val MAX_LINES = 30000
 
-    /** 生成日志文件并返回；失败返回 null（不抛异常） */
+    /** 生成日志文件（cacheDir 内）并返回；失败返回 null（不抛异常） */
     fun export(context: Context): File? = runCatching {
         val dir = File(context.cacheDir, EXPORT_DIR).apply { mkdirs() }
         val out = File(dir, "yunx_log_${timestamp()}.txt")
+        FileOutputStream(out).use { exportTo(context, it) }
+        out
+    }.getOrNull()
 
-        OutputStreamWriter(FileOutputStream(out), StandardCharsets.UTF_8).use { writer ->
+    /**
+     * 直接保存日志到公共「下载」目录；成功返回 true。
+     * - Android 10+（API 29+）：MediaStore.Downloads 直写，无需任何权限；
+     * - Android 9-（API 21-28）：写公共 Download 目录（需 WRITE_EXTERNAL_STORAGE）。
+     * 不经过 FileProvider / 跨进程分享，彻底规避「保存到下载」时系统 UI 读取 uri 被拒的问题。
+     */
+    fun saveToDownloads(context: Context): Boolean = runCatching {
+        val fileName = "yunx_log_${timestamp()}.txt"
+        val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+            val uri: Uri = context.contentResolver
+                .insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: return@runCatching false
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                exportTo(context, out)
+            } ?: false
+        } else {
+            val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!dir.exists()) dir.mkdirs()
+            val file = File(dir, fileName)
+            FileOutputStream(file).use { out -> exportTo(context, out) }
+        }
+        ok
+    }.getOrDefault(false)
+
+    /** 把头部信息 + logcat 运行/崩溃日志写入指定输出流 */
+    private fun exportTo(context: Context, output: OutputStream): Boolean = runCatching {
+        OutputStreamWriter(output, StandardCharsets.UTF_8).use { writer ->
             // ---------- 头部：应用与设备信息 ----------
             val pkg = context.packageManager.getPackageInfo(context.packageName, 0)
             writer.write("云析（YunX）日志导出\n")
@@ -53,8 +92,8 @@ object LogExporter {
             writer.write("========== 崩溃日志（logcat -b crash -d -v time）==========\n")
             dumpLogcat(writer, listOf("logcat", "-b", "crash", "-d", "-v", "time"))
         }
-        out
-    }.getOrNull()
+        true
+    }.getOrDefault(false)
 
     /** 执行 logcat 命令并写入 writer（仅保留最近 MAX_LINES 行） */
     private fun dumpLogcat(writer: OutputStreamWriter, command: List<String>) {

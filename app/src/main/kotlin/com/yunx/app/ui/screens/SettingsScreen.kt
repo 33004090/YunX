@@ -61,6 +61,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     var showThreadsDialog by remember { mutableStateOf(false) }
+    var showLogDialog by remember { mutableStateOf(false) }
     // 本地状态：修改后立即刷新 UI，同时同步外部保存值
     var threads by remember { mutableStateOf(downloadThreads) }
     LaunchedEffect(downloadThreads) { threads = downloadThreads }
@@ -99,16 +100,7 @@ fun SettingsScreen(
             icon = Icons.Outlined.Article,
             title = "导出日志",
             description = "导出崩溃日志与应用信息，便于排查问题",
-            onClick = {
-                scope.launch {
-                    val file = withContext(Dispatchers.IO) { LogExporter.export(context) }
-                    if (file != null && LogExporter.share(context, file)) {
-                        Toast.makeText(context, "日志已导出", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "导出日志失败", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
+            onClick = { showLogDialog = true }
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -119,6 +111,61 @@ fun SettingsScreen(
             title = "关于云析",
             description = "网盘链接解析与下载工具",
             onClick = {}
+        )
+    }
+
+    // 导出日志方式选择弹窗
+    if (showLogDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogDialog = false },
+            title = { Text("导出日志") },
+            text = {
+                Column {
+                    Text(
+                        text = "选择日志导出方式：",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            showLogDialog = false
+                            scope.launch {
+                                val file = withContext(Dispatchers.IO) { LogExporter.export(context) }
+                                if (file != null && LogExporter.share(context, file)) {
+                                    Toast.makeText(context, "日志已分享", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "导出日志失败", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("分享日志（发送到其他应用）")
+                    }
+                    TextButton(
+                        onClick = {
+                            showLogDialog = false
+                            scope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    LogExporter.saveToDownloads(context)
+                                }
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "已保存到下载目录" else "保存失败",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("保存到下载目录")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLogDialog = false }) { Text("取消") }
+            }
         )
     }
 
