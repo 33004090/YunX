@@ -103,7 +103,7 @@ fun AboutScreen(
                 icon = Icons.Outlined.Cloud,
                 title = "应用简介",
                 description = "云析（YunX）是一款网盘分享链接解析与高速下载工具。" +
-                    "粘贴分享链接，即可浏览分享内容并直接下载文件，无需登录网页端。"
+                    "粘贴分享链接，登录网盘账号后即可浏览分享内容并直接高速下载文件。"
             )
 
             // ---------- 支持平台 ----------
@@ -120,7 +120,7 @@ fun AboutScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "云析 v$versionName · Made with ❤",
+                text = "云析 v$versionName · Made with ❤ and deepseek",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.outline,
                 modifier = Modifier
@@ -270,7 +270,7 @@ private fun FeatureCard() {
     val features = listOf(
         "一键解析分享链接" to "夸克 / UC / 迅雷 / 百度 / 139 分享直链识别",
         "高速分片下载" to "多线程并发 + 断点续传，充分利用带宽",
-        "取链即删" to "百度 / 夸克转存后立即清理，不留残留",
+        "取链即删" to "转存后立即清理，不留残留",
         "凭证本地化" to "Cookie 加密落库，仅存本机"
     )
     SectionCard {

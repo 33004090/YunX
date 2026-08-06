@@ -1,6 +1,17 @@
 package com.yunx.app.ui.screens
 
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,11 +40,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,7 +55,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.yunx.app.data.network.ShareLinkParser
+import com.yunx.app.data.network.SharePlatform
 import com.yunx.app.ui.resolve.DownloadLinkDialog
 import com.yunx.app.ui.resolve.ShareDetailScreen
 import com.yunx.app.ui.viewmodel.ResolveUiState
@@ -66,6 +84,60 @@ fun ResolveScreen(
     var link by rememberSaveable { mutableStateOf("") }
     var pwd by rememberSaveable { mutableStateOf("") }
     var pwdEdited by rememberSaveable { mutableStateOf(false) }
+
+    // 剪贴板分享链接提示状态：待提示的剪贴板文本 + 已忽略的文本
+    var clipboardSuggestion by remember { mutableStateOf<String?>(null) }
+    var ignoredClipboard by remember { mutableStateOf<String?>(null) }
+
+    // 检测函数：读取剪贴板，满足条件则设置提示（三重触发：组合时 / ON_RESUME / 剪贴板变化）
+    val maybeSuggestClipboard: () -> Unit = {
+        val text = readClipboardSafely(context)
+        if (text != null &&
+            state is ResolveUiState.Idle &&
+            text.isNotBlank() &&
+            text != link &&
+            text != ignoredClipboard &&
+            ShareLinkParser.parse(text) != null
+        ) {
+            clipboardSuggestion = text
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    DisposableEffect(lifecycleOwner, clipboard) {
+        // 剪贴板变化立即检测（前台最灵敏，复制即提示）
+        val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
+            maybeSuggestClipboard()
+            // 部分 ROM 剪贴板内容写入有延迟，300ms 后重试一次
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                maybeSuggestClipboard()
+            }, 300)
+        }
+        clipboard.addPrimaryClipChangedListener(clipListener)
+        // 打开应用 / 从后台切回时检测
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) maybeSuggestClipboard()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        // 冷启动兜底：组合完成立即检测一次（避免 ON_RESUME 早于 observer 注册导致漏检）
+        maybeSuggestClipboard()
+        onDispose {
+            clipboard.removePrimaryClipChangedListener(clipListener)
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Android 11 及以下：轻量轮询兜底（2s 一次）。
+    // 部分 ROM（如 vivo）剪贴板监听不触发时仍能识别；Android 12+ 读剪贴板会弹系统提示，不轮询。
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        LaunchedEffect(Unit) {
+            while (true) {
+                kotlinx.coroutines.delay(2000)
+                maybeSuggestClipboard()
+            }
+        }
+    }
 
     // 链接变化时自动匹配提取码（用户未手动输入时）
     LaunchedEffect(link) {
@@ -113,6 +185,44 @@ fun ResolveScreen(
                 },
                 onClearPwd = { pwd = "" }
             )
+        }
+
+        // 剪贴板分享链接提示卡片（仅输入页、有待提示内容时显示，带弹出动画）
+        // animatedSuggestion 保留最后提示内容，保证退出动画期间卡片不消失
+        var animatedSuggestion by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(clipboardSuggestion) {
+            clipboardSuggestion?.let { animatedSuggestion = it }
+        }
+        AnimatedVisibility(
+            visible = state is ResolveUiState.Idle && clipboardSuggestion != null,
+            enter = fadeIn(tween(200)) +
+                slideInVertically(tween(250)) { -it / 2 } +
+                scaleIn(tween(250, delayMillis = 60)),
+            exit = fadeOut(tween(150)) +
+                slideOutVertically(tween(200)) { -it / 2 } +
+                scaleOut(tween(200)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            animatedSuggestion?.let { suggestion ->
+                val parsed = ShareLinkParser.parse(suggestion)
+                ClipboardSuggestCard(
+                    platformName = parsed?.platform?.let { platformLabel(it) } ?: "网盘",
+                    onPaste = {
+                        link = suggestion
+                        pwd = parsed?.pwd.orEmpty()
+                        pwdEdited = true
+                        clipboardSuggestion = null
+                        viewModel.startResolve(suggestion, parsed?.pwd)
+                    },
+                    onDismiss = {
+                        ignoredClipboard = suggestion
+                        clipboardSuggestion = null
+                    }
+                )
+            }
         }
     }
 
@@ -274,6 +384,86 @@ private fun LoadingContent() {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+/** 安全读取剪贴板最新文本；失败返回 null（部分 ROM 可能限制剪贴板访问） */
+private fun readClipboardSafely(context: Context): String? = runCatching {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.primaryClip
+        ?.takeIf { it.itemCount > 0 }
+        ?.getItemAt(0)
+        ?.coerceToText(context)
+        ?.toString()
+}.getOrNull()
+
+/** 平台名称（提示卡片展示） */
+private fun platformLabel(platform: SharePlatform): String = when (platform) {
+    SharePlatform.QUARK -> "夸克网盘"
+    SharePlatform.UC -> "UC 网盘"
+    SharePlatform.XUNLEI -> "迅雷网盘"
+    SharePlatform.BAIDU -> "百度网盘"
+    SharePlatform.C139 -> "139 网盘"
+}
+
+/** 剪贴板分享链接提示卡片：检测到分享链接时，询问是否粘贴解析 */
+@Composable
+private fun ClipboardSuggestCard(
+    platformName: String,
+    onPaste: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Outlined.Link,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "检测到 $platformName 分享链接",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "是否粘贴到解析框并开始解析？",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text("忽略", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Button(
+                    onClick = onPaste,
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text("粘贴并解析")
+                }
+            }
         }
     }
 }

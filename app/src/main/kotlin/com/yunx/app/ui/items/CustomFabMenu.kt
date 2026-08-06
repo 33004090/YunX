@@ -1,50 +1,47 @@
-/*
- * Copyright 2026 jsfmytg (github.com/bszapp)
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * Modifications copyright (C) 2026 Your Name
- * This file has been modified to adapt to the YunX project, including
- * package rename and resource reference changes.
- */
-
-/*
- * Modified for YunX project
- * Original source: com.wifi.toolbox.ui.items.CustomFabMenu
- */
 package com.yunx.app.ui.items
 
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.*
-import androidx.compose.ui.semantics.*
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.yunx.app.R
 
+/**
+ * 浮动操作菜单项：标签 + 图标 + 可选选中态。
+ */
 data class FabMenuItem(
     val label: String,
     val icon: ImageVector,
@@ -52,6 +49,13 @@ data class FabMenuItem(
     val onClick: () -> Unit
 )
 
+/**
+ * 浮动操作菜单（云析原创实现，Material3 风格）：
+ * - 右下角 FAB，点击展开/收起菜单，图标伴随旋转动画（＋ → ✕）；
+ * - 菜单项从 FAB 上方滑入淡出，选中项高亮并带勾选标记；
+ * - 展开时点击菜单外区域自动收起；
+ * - 可选 visible 控制整体显隐。
+ */
 @Composable
 fun BoxScope.CustomFabMenu(
     expanded: Boolean,
@@ -60,8 +64,24 @@ fun BoxScope.CustomFabMenu(
     modifier: Modifier = Modifier,
     visible: Boolean = true
 ) {
-    val focusRequester = remember { FocusRequester() }
-    val closeMenuActionLabel = stringResource(R.string.close_menu)
+    // FAB 图标旋转：展开时 ＋ 旋转 90° 变为 ✕
+    val fabRotation by animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = tween(durationMillis = 220),
+        label = "fabRotation"
+    )
+
+    // 展开时覆盖全屏的透明点击层：点击菜单外区域收起
+    if (expanded) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onCheckedChange(false) }
+        )
+    }
 
     Column(
         modifier = modifier
@@ -70,113 +90,76 @@ fun BoxScope.CustomFabMenu(
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.Bottom
     ) {
-        // 菜单项区域
+        // ---------- 菜单项 ----------
         AnimatedVisibility(
             visible = expanded,
-            enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
+            enter = fadeIn(tween(160)) + slideInVertically(tween(220)) { it / 2 },
+            exit = fadeOut(tween(120)) + slideOutVertically(tween(180)) { it / 2 }
         ) {
             Column(
                 horizontalAlignment = Alignment.End,
-                modifier = Modifier.padding(bottom = 8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(bottom = 10.dp)
             ) {
-                items.forEachIndexed { i, item ->
-                    // 第一个项上方增加一点间距，模拟原 FloatingActionButtonMenu 的 4dp 间隔
-                    if (i == 0) {
-                        Spacer(Modifier.height(4.dp))
-                    }
-
-                    Surface(
+                items.forEach { item ->
+                    ExtendedFloatingActionButton(
                         onClick = {
                             item.onClick()
                             onCheckedChange(false)
                         },
                         shape = RoundedCornerShape(16.dp),
-                        color = if (item.isSelected) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceContainer,
-                        contentColor = if (item.isSelected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .height(42.dp)
-                            .semantics {
-                                isTraversalGroup = true
-                                if (i == items.size - 1) {
-                                    customActions = listOf(
-                                        CustomAccessibilityAction(label = closeMenuActionLabel) {
-                                            onCheckedChange(false); true
-                                        }
-                                    )
-                                }
-                            }
-                            .then(
-                                if (i == 0) {
-                                    Modifier.onKeyEvent {
-                                        if (it.type == KeyEventType.KeyDown &&
-                                            (it.key == Key.DirectionUp || (it.isShiftPressed && it.key == Key.Tab))
-                                        ) {
-                                            focusRequester.requestFocus()
-                                            return@onKeyEvent true
-                                        }
-                                        false
-                                    }
-                                } else Modifier
-                            )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .fillMaxHeight(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        elevation = FloatingActionButtonDefaults.elevation(
+                            defaultElevation = if (item.isSelected) 0.dp else 3.dp,
+                            pressedElevation = if (item.isSelected) 0.dp else 6.dp
+                        ),
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        icon = {
                             Icon(
                                 imageVector = item.icon,
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp)
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = item.label,
-                                style = if (item.isSelected) MaterialTheme.typography.labelLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ) else MaterialTheme.typography.labelLarge
-                            )
+                        },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = item.label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (item.isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                                if (item.isSelected) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = "已选择",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
                         }
-                    }
-
-                    // 每个项之后添加 4dp 间距（最后一个项之后不再添加）
-                    if (i < items.size - 1) {
-                        Spacer(Modifier.height(4.dp))
-                    }
+                    )
                 }
             }
         }
 
-        // 主 FAB 按钮
-        AnimatedVisibility(
-            visible = visible || expanded,
-            enter = fadeIn() + scaleIn(),
-            exit = fadeOut() + scaleOut()
-        ) {
+        // ---------- 主 FAB ----------
+        AnimatedVisibility(visible = visible) {
             FloatingActionButton(
                 onClick = { onCheckedChange(!expanded) },
-                modifier = Modifier
-                    .size(48.dp)
-                    .focusRequester(focusRequester)
-                    .semantics { traversalIndex = -1f },
+                modifier = Modifier.size(52.dp),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                shape = MaterialTheme.shapes.large
             ) {
-                Crossfade(
-                    targetState = expanded,
-                    animationSpec = tween(200),
-                    label = "fab icon"
-                ) { isExpanded ->
-                    Icon(
-                        imageVector = if (isExpanded) Icons.Filled.Close else Icons.Filled.Add,
-                        contentDescription = if (isExpanded) stringResource(R.string.close_menu) else stringResource(R.string.open_menu),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.Close else Icons.Filled.Add,
+                    contentDescription = if (expanded) "关闭菜单" else "打开菜单",
+                    modifier = Modifier
+                        .size(24.dp)
+                        .graphicsLayer { rotationZ = fabRotation }
+                )
             }
         }
     }
