@@ -28,11 +28,24 @@ object C139Constants {
     /** 分享专用 host（§9/§12：share-kd-njs.yun.139.com） */
     const val SHARE_BASE = "https://share-kd-njs.yun.139.com"
 
-    /** 分享列目录（§7 share 类型） */
+    /** 分享列目录（§7/§15 share 类型；7.13+ 请求/响应加密，§14） */
     const val SHARE_LIST_URL = "$SHARE_BASE/yun-share/richlifeApp/devapp/IOutLink/getOutLinkInfoV6"
 
-    /** 分享取直链（§8 share 类型） */
-    const val SHARE_LINK_URL = "$SHARE_BASE/yun-share/richlifeApp/devapp/IOutLink/getContentInfoFromOutLink"
+    /** 分享取直链（§8/§15 share 类型；7.13+ 请求/响应加密，§14） */
+    const val SHARE_LINK_URL = "$SHARE_BASE/yun-share/richlifeApp/devapp/IOutLink/dlFromOutLinkV3"
+
+    /** §14 分享接口 AES-CBC 固定密钥（16 字节，所有账号共用） */
+    const val SHARE_AES_KEY = "PVGDwmcvfs1uV3d1"
+
+    /** 分享接口必带设备/渠道上下文头（设备头修复文档 §3：缺任一即 9530） */
+    const val SHARE_X_DEVICEINFO = "||3|12.27.0|||||chrome 150.0.0.0|360X444|zh-cn|||"
+    const val SHARE_X_HUAWEI_CHANNELSRC = "10245500"
+    const val SHARE_X_MM_SOURCE = "0002"
+
+    /** 分享接口 User-Agent（必须浏览器/WebView UA，不能用 okhttp/4.x，设备头修复文档 §3.1） */
+    const val SHARE_MOBILE_UA =
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/150.0.0.0 Mobile Safari/537.36"
 
     /** PC 桌面 UA（对齐文档 §9 请求头的 chrome/120.0.0.0 windows10；WebView 需桌面版页面才会下发 authorization） */
     const val PC_UA =

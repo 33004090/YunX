@@ -31,12 +31,11 @@ class C139ResolveRepository(private val api: C139Api) : ShareResolveRepository {
 
     override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
         runCatching {
-            val account = C139Constants.extractAccountFull(cookie)
-                ?: throw IllegalStateException("登录态缺少账号信息，请重新登录")
-            val authorization = C139Constants.extractAuthorization(cookie)
-            // 根目录 pCaID 传空字符串（文档 §7：pCaID 父目录，空=root）
-            val pcaId = if (dirFid == "0" || dirFid.isBlank()) "" else dirFid
-            api.getShareFiles(session.shareId, pcaId, account, authorization)
+            // 列表端点为匿名调用（§9530修复文档 §3）：无需 authorization/account，Api 内部走匿名请求
+            // pCaID 根目录必须传 "root"（§16.2：空串会报 pCaID不能为空），子目录传父 coID
+            val pcaId = if (dirFid == "0" || dirFid.isBlank()) "root" else dirFid
+            // passwd = 分享提取码（createSession 时存入 stoken；无则空串）
+            api.getShareFiles(session.shareId, pcaId, session.stoken)
                 ?: throw IllegalStateException("未获取到文件列表")
         }.fold(
             onSuccess = { Result.success(it) },
