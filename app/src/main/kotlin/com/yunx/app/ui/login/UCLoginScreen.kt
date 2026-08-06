@@ -3,6 +3,7 @@ package com.yunx.app.ui.login
 import android.graphics.Bitmap
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -79,6 +80,8 @@ fun UCLoginScreen(
             settings.displayZoomControls = false
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
+            settings.layoutAlgorithm = WebSettings.LayoutAlgorithm.NARROW_COLUMNS
+            setInitialScale(0)
             settings.userAgentString = UCConstants.USER_AGENT
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -86,6 +89,14 @@ fun UCLoginScreen(
                 }
                 override fun onPageFinished(view: WebView?, url: String?) {
                     isLoading = false
+                    // 强制覆盖页面 viewport：允许缩放 + 适配屏幕宽度（桌面版页面无 viewport 或限制了缩放时生效）
+                    view?.evaluateJavascript(
+                        "(function(){var m=document.querySelector('meta[name=\"viewport\"]');" +
+                            "var c='width=device-width,initial-scale=1.0,maximum-scale=5.0,user-scalable=yes';" +
+                            "if(m){m.setAttribute('content',c);}else{var n=document.createElement('meta');n.name='viewport';n.content=c;document.head.appendChild(n);}" +
+                            "window.dispatchEvent(new Event('resize'));})()",
+                        null
+                    )
                 }
             }
             webChromeClient = WebChromeClient()
