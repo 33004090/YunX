@@ -49,8 +49,15 @@ class XunleiAccountViewModel(
             if (step.needSms) {
                 // 触发安全验证：自动发送短信验证码，UI 切到短信步骤
                 val smsStep = repository.sendSms(username.trim())
-                loginStep = smsStep
-                if (smsStep.smsCreditKey.isBlank()) loginError = smsStep.message
+                if (smsStep.smsCreditKey.isNotBlank()) {
+                    loginStep = smsStep
+                } else {
+                    // 短信发送失败：保留 reviewUrl，UI 提供「浏览器验证」兜底（alist 方式）
+                    loginStep = step.copy(
+                        message = smsStep.message.ifBlank { "短信发送失败，请用浏览器验证" }
+                    )
+                    loginError = smsStep.message.ifBlank { "短信发送失败" }
+                }
             } else if (step.sessionKey.isNotBlank() && step.sessionId.isNotBlank()) {
                 val ok = repository.finishLogin(step, username.trim())
                 if (!ok) loginError = "登录失败，无法换取凭证"

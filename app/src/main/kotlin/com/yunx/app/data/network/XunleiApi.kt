@@ -31,6 +31,7 @@ data class XunleiLoginStep(
     val sessionId: String = "",       // 登录成功的 sessionID（换 token 用 signin_token）
     val nickname: String = "",
     val userID: String = "",
+    val reviewUrl: String = "",       // review_panel 返回的验证页 URL（可浏览器兜底）
     val message: String = ""
 )
 
@@ -56,18 +57,27 @@ class XunleiApi(
     // ---------- 登录 ----------
 
     /** 1. 验证码盾初始化，返回 captcha_token（换 token 与 pan 请求需带 X-Captcha-Token）。
-     * 官方抓包：client_id 用 app 凭据 Xp6vsxz_7IYVw2BB */
+     * 官方抓包：client_id 用 app 凭据 Xp6vsxz_7IYVw2BB。
+     * 按文档 §9.5：meta 必须带 captcha_sign（10-salt 算法），否则拿到降级 token（POST 类接口可能拒绝）。 */
     suspend fun initCaptcha(
         deviceId: String,
         username: String,
         action: String = "POST:/auth/signin/token"
     ): String? = withContext(Dispatchers.IO) {
+        val ts = System.currentTimeMillis().toString()
+        val sign = buildCaptchaSign(deviceId, ts)
         val body = JSONObject()
             .put("action", action)
             .put("captcha_token", "")
             .put("client_id", XunleiConstants.APP_CLIENT_ID)
             .put("device_id", deviceId)
-            .put("meta", JSONObject().put("username", username))
+            .put("meta", JSONObject()
+                .put("username", username)
+                .put("client_version", XunleiConstants.APP_CLIENT_VERSION)
+                .put("package_name", XunleiConstants.APP_PACKAGE_NAME)
+                .put("timestamp", ts)
+                .put("captcha_sign", sign)
+                .put("user_id", currentUserId)) // 真实 user_id，空会得到降级 token
             .put("redirect_uri", "xlaccsdk01://xunlei.com/callback?state=harbor")
             .toString()
         val request = Request.Builder()
@@ -242,11 +252,12 @@ class XunleiApi(
             json.optString("verifyType") == "MEA" || json.optString("verifyType").isNotBlank()
         return XunleiLoginStep(
             needSms = needSms,
+            reviewUrl = json.optString("reviewurl"), // 短信发不出时可让用户浏览器完成验证（alist 方式）
             message = json.optString("errorDesc").ifBlank { json.optString("error_description") }
         )
     }
 
-    /** 登录请求公共体（对齐官方 app 抓包字段；peerID/devicesign 用官方真实设备标识） */
+    /** 登录请求公共体（对齐官方 app 抓包字段；peerID/devicesign 用动态生成的设备指纹） */
     private fun baseLoginBody(
         deviceId: String,
         clientVersion: String,
@@ -259,10 +270,10 @@ class XunleiApi(
         .put("isCompressed", "0")
         .put("appid", "40")
         .put("clientVersion", clientVersion)
-        .put("peerID", XunleiConstants.PEER_ID) // 官方真实 peerID
+        .put("peerID", XunleiDeviceFingerprint.peerId()) // 动态设备 peerID
         .put("appName", "ANDROID-com.xunlei.downloadprovider")
         .put("sdkVersion", sdkVersion)
-        .put("devicesign", XunleiConstants.DEVICE_SIGN) // 官方真实设备指纹
+        .put("devicesign", XunleiDeviceFingerprint.deviceSign()) // 动态设备指纹（§8 公式）
         .put("netWorkType", "WIFI")
         .put("providerName", "NONE")
         .put("deviceModel", "M2004J7AC")
@@ -598,7 +609,7 @@ class XunleiApi(
     }
 
     companion object {
-        /** 设备 ID：复用官方抓包真实设备（devicesign 前半一致，保证设备指纹有效） */
-        fun newDeviceId(): String = XunleiConstants.DEVICE_ID
+        /** 设备 ID：动态生成的设备指纹（进程启动时由 Application 初始化并持久化） */
+        fun newDeviceId(): String = XunleiDeviceFingerprint.deviceId()
     }
 }

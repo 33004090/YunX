@@ -152,6 +152,32 @@ fun XunleiLoginScreen(
                     },
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 ) { Text("重新发送验证码") }
+
+                // 短信发不出时的浏览器验证兜底（alist 方式：打开 reviewurl 完成人机/短信验证）
+                if (step.reviewUrl.isNotBlank()) {
+                    TextButton(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(step.reviewUrl))
+                                )
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text(
+                            text = "短信收不到？浏览器验证",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(
+                        text = "浏览器完成验证后，返回本页重新点击「验证并登录」",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
             }
 
             // 未设置密码：跳转迅雷官网设置（浏览器打开）

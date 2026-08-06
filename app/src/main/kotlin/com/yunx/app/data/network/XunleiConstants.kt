@@ -46,17 +46,17 @@ object XunleiConstants {
     /** 浏览器 UA（Web 端 pan 请求） */
     const val WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
-    // ---------- 设备标识（官方抓包真实设备三件套） ----------
-    // devicesign 后半段为迅雷 SDK 生成的设备指纹，无法本地模拟；
-    // 复用官方抓包中验证可用的真实设备标识（指纹与账号无关，仅证明设备真实性）。
+    // ---------- 设备标识（fallback 官方指纹，正常情况下由 XunleiDeviceFingerprint 动态生成） ----------
+    // devicesign 后半段为迅雷 SDK 生成的设备指纹，动态生成算法见 XunleiDeviceFingerprint（§8 公式）。
+    // 以下官方抓包值仅作为「指纹未初始化/异常路径」的兜底，避免请求缺字段崩溃。
 
-    /** 设备 ID（x-device-id / captcha device_id / devicesign 前半） */
+    /** 设备 ID（x-device-id / captcha device_id / devicesign 前半；fallback） */
     const val DEVICE_ID = "78a70629a2b17d0b4302317ffa94807a"
 
-    /** 登录请求 peerID（官方抓包固定值） */
+    /** 登录请求 peerID（fallback） */
     const val PEER_ID = "92df4c42e0926ff55f1c605ebe4c3754"
 
-    /** 设备指纹（div101.设备ID+SDK指纹，官方 sendsms/smslogin/pan 全链路验证可用） */
+    /** 设备指纹 div101.设备ID+SDK指纹（fallback） */
     const val DEVICE_SIGN = "div101.78a70629a2b17d0b4302317ffa94807a31491e163e795b39e798ed33ae58858b"
 
     // ---------- 登录端点 ----------
