@@ -19,6 +19,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -26,6 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import com.yunx.app.data.db.AppDatabase
 import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
@@ -36,6 +40,7 @@ import com.yunx.app.data.network.QuarkApi
 import com.yunx.app.data.network.UCApi
 import com.yunx.app.data.network.XunleiApi
 import com.yunx.app.data.prefs.SettingsRepository
+import com.yunx.app.data.update.UpdateChecker
 import com.yunx.app.data.repository.BaiduAccountRepository
 import com.yunx.app.data.repository.BaiduResolveRepository
 import com.yunx.app.data.repository.C139AccountRepository
@@ -58,6 +63,7 @@ import com.yunx.app.ui.screens.DriveScreen
 import com.yunx.app.ui.screens.OnboardingScreen
 import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
+import com.yunx.app.ui.screens.UpdateDialog
 import com.yunx.app.ui.viewmodel.BaiduAccountViewModel
 import com.yunx.app.ui.viewmodel.C139AccountViewModel
 import com.yunx.app.ui.viewmodel.DownloadViewModel
@@ -65,6 +71,7 @@ import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
 import com.yunx.app.ui.viewmodel.UCAccountViewModel
 import com.yunx.app.ui.viewmodel.XunleiAccountViewModel
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
 /**
@@ -87,11 +94,28 @@ fun MainScreen() {
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     // 首次启动引导页（context 声明后检测）
     var showOnboarding by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("yunx_prefs", android.content.Context.MODE_PRIVATE)
         showOnboarding = !prefs.getBoolean("onboarding_shown", false)
+    }
+
+    // 更新检测：请求 GitHub 最新 Release（仓库无 Release / 网络失败则不提示）
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var pendingRelease by remember { mutableStateOf<UpdateChecker.Release?>(null) }
+    LaunchedEffect(Unit) {
+        val release = UpdateChecker.fetchLatestRelease() ?: return@LaunchedEffect
+        val current = UpdateChecker.currentVersion(context)
+        val prefs = context.getSharedPreferences("yunx_prefs", android.content.Context.MODE_PRIVATE)
+        val ignored = prefs.getString("ignored_version", "")
+        if (UpdateChecker.compareVersions(release.tagName, current) > 0 &&
+            release.tagName != ignored
+        ) {
+            pendingRelease = release
+            showUpdateDialog = true
+        }
     }
     val api = remember { QuarkApi() }
     val ucApi = remember { UCApi() }
@@ -353,6 +377,38 @@ fun MainScreen() {
                     )
                 }
             }
+        }
+    }
+
+    // 发现新版本弹窗（覆盖在主页之上）
+    pendingRelease?.let { release ->
+        if (showUpdateDialog) {
+            UpdateDialog(
+                currentVersion = UpdateChecker.currentVersion(context),
+                release = release,
+                onDownload = {
+                    showUpdateDialog = false
+                    // 用内置下载功能下载更新 APK 到 Download 目录，并切到下载页
+                    val apk = release.assets.firstOrNull { it.name.endsWith(".apk", true) }
+                    if (apk != null) {
+                        scope.launch {
+                            downloadManager.enqueue(url = apk.downloadUrl, fileName = apk.name)
+                            currentTab = MainTab.Download
+                        }
+                        Toast.makeText(context, "已加入下载，完成后点击「打开」即可安装", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "未找到 APK 下载链接", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onLater = { showUpdateDialog = false },
+                onIgnore = {
+                    context.getSharedPreferences("yunx_prefs", android.content.Context.MODE_PRIVATE)
+                        .edit()
+                        .putString("ignored_version", release.tagName)
+                        .apply()
+                    showUpdateDialog = false
+                }
+            )
         }
     }
 }
