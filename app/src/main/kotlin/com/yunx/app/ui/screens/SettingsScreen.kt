@@ -1,6 +1,8 @@
 package com.yunx.app.ui.screens
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,9 +15,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Article
+import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -41,6 +45,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.yunx.app.data.backup.AuthBackupManager
 import com.yunx.app.util.LogExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,6 +64,7 @@ fun SettingsScreen(
     downloadThreads: Int,
     onThreadsChange: (Int) -> Unit,
     onAboutClick: () -> Unit,
+    backupManager: AuthBackupManager,
     modifier: Modifier = Modifier
 ) {
     var showThreadsDialog by remember { mutableStateOf(false) }
@@ -68,6 +74,29 @@ fun SettingsScreen(
     LaunchedEffect(downloadThreads) { threads = downloadThreads }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // 导入网盘认证文件选择器
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val text = runCatching {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                }.getOrNull()
+                if (text == null) {
+                    Toast.makeText(context, "读取文件失败", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val count = runCatching {
+                    withContext(Dispatchers.IO) { backupManager.importJson(text) }
+                }.getOrElse { e ->
+                    Toast.makeText(context, "导入失败：${e.message}", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                Toast.makeText(context, "已恢复 $count 个平台的认证信息", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -102,6 +131,42 @@ fun SettingsScreen(
             title = "导出日志",
             description = "导出崩溃日志与应用信息，便于排查问题",
             onClick = { showLogDialog = true }
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        SectionLabel("网盘认证")
+        SettingsItem(
+            icon = Icons.Outlined.Backup,
+            title = "导出网盘认证",
+            description = "打包已登录的网盘认证信息为 JSON 文件（下载目录）",
+            onClick = {
+                scope.launch {
+                    val json = runCatching {
+                        withContext(Dispatchers.IO) { backupManager.exportJson() }
+                    }.getOrNull()
+                    if (json == null) {
+                        Toast.makeText(context, "导出失败", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    val saved = withContext(Dispatchers.IO) {
+                        backupManager.saveToDownloads(context, json)
+                    }
+                    Toast.makeText(
+                        context,
+                        if (saved) "已导出到下载目录" else "导出失败",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsItem(
+            icon = Icons.Outlined.Restore,
+            title = "导入网盘认证",
+            description = "从 JSON 文件恢复网盘认证信息",
+            onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) }
         )
 
         Spacer(modifier = Modifier.height(24.dp))

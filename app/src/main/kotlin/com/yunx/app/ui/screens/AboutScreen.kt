@@ -124,6 +124,15 @@ fun AboutScreen(
             // ---------- 免责声明 ----------
             DisclaimerCard()
 
+            // ---------- 开源协议 ----------
+            Text(
+                text = "本项目基于 GNU AGPL-3.0 协议开源",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+
             // ---------- 重新预览欢迎界面 ----------
             PreviewOnboardingCard(onClick = onPreviewOnboarding)
 

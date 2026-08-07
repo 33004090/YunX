@@ -29,6 +29,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yunx.app.data.db.AppDatabase
 import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
+import com.yunx.app.data.backup.AuthBackupManager
 import com.yunx.app.data.network.BaiduApi
 import com.yunx.app.data.network.C139Api
 import com.yunx.app.data.network.QuarkApi
@@ -112,6 +113,16 @@ fun MainScreen() {
     }
     val c139Repository = remember {
         C139AccountRepository(db.c139AccountDao())
+    }
+    // 网盘认证备份：打包/恢复各平台凭证
+    val backupManager = remember {
+        AuthBackupManager(
+            db.quarkAccountDao(),
+            db.ucAccountDao(),
+            db.xunleiAccountDao(),
+            db.baiduAccountDao(),
+            db.c139AccountDao()
+        )
     }
     // 下载管理器：OkHttp 分片下载器 + Room 任务持久化 + 可配置线程数（设置页动态生效）
     val downloadManager = remember {
@@ -337,7 +348,8 @@ fun MainScreen() {
                         scrollBehavior = scrollBehavior,
                         downloadThreads = settings.downloadThreads,
                         onThreadsChange = { settings.downloadThreads = it },
-                        onAboutClick = { showAbout = true }
+                        onAboutClick = { showAbout = true },
+                        backupManager = backupManager
                     )
                 }
             }
