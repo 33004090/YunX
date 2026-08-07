@@ -285,9 +285,17 @@ class ResolveViewModel(
                     "User-Agent" to BaiduConstants.UA_NETDISK
                 )
                 isC139 -> mapOf("User-Agent" to C139Constants.PC_UA)
+                // UC：OSS 直链按 Referer 档位限速（缺 Referer 被 Callback 限到 ~100 KB/s），
+                // 补官方 Web 客户端同款 Referer/Origin 即满速
+                isUC -> mapOf(
+                    "Cookie" to credential,
+                    "User-Agent" to UCConstants.USER_AGENT,
+                    "Referer" to "https://drive.uc.cn/",
+                    "Origin" to "https://drive.uc.cn"
+                )
                 else -> mapOf(
                     "Cookie" to credential,
-                    "User-Agent" to if (isUC) UCConstants.USER_AGENT else QuarkConstants.API_USER_AGENT
+                    "User-Agent" to QuarkConstants.API_USER_AGENT
                 )
             }
             // 夸克直链：并发探测最近 CDN 节点（dl-pc-sz → 就近），失败自动回退原链接
