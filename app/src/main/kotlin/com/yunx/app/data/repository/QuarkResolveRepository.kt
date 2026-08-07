@@ -89,21 +89,62 @@ class QuarkResolveRepository(private val api: QuarkApi) : ShareResolveRepository
         onFailure = { Result.failure(it) }
     )
 
-    /** 夸克取直链：转存到临时目录 → 用转存后新 fid 取直链 → 取链成功后立即删除临时转存 */
+    /** 夸克取直链（修复版，文档《夸克网盘重复获取直链失败修复》方案二）：
+     *  1) 每次转存落到「YunX临时转存」下的【唯一子目录 tr_<时间戳>_<随机>】，
+     *     使夸克 sharepage/save 去重键（to_pdir_fid）每次不同 → 永远生成新 fid，
+     *     从根上避免「二次转存返回已删除 fid → download 404 code:21001」。
+     *  2) 取链成功后【不立即删】，把临时子目录 fid 通过 DownloadLink.cleanupDirFid 带回，
+     *     由下载完成的 onComplete 回调删除（见 ResolveViewModel），保证下载期间 fid 一直存活。
+     *  3) 移除原来的 per-click clearTempDir（对去重无效，且可能误删进行中的文件）。
+     */
     override suspend fun getShareDownloadLink(
         session: ShareSession,
         file: ShareFile,
         cookie: String
     ): Result<DownloadLink> = runCatching {
-        val dirFid = ensureTempDir(cookie).getOrThrow()
-        val savedFid = transferFile(session, file, dirFid, cookie).getOrThrow()
+        val baseDir = ensureTempDir(cookie).getOrThrow()
+
+        // 唯一临时子目录：to_pdir_fid 每次不同 → 绕开夸克去重
+        val subDirName = "tr_${System.nanoTime()}_${(Math.random() * 1_000_000).toInt()}"
+        val subDirFid = api.createFolder(subDirName, baseDir, cookie)
+            ?: throw IllegalStateException("创建临时转存目录失败")
+
+        val savedFid = transferFileTo(session, file, subDirFid, cookie).getOrThrow()
         val link = api.getDownloadLink(savedFid, cookie)
             ?: throw IllegalStateException("获取下载链接失败")
-        // 取链成功后立即删除临时转存文件（失败不阻断下载；目录保留，下次复用）
-        runCatching { api.deleteFile(savedFid, cookie) }
-        link
+
+        // 不在此删除！下载完成后再删整个子目录（含文件）
+        link.copy(cleanupDirFid = subDirFid)
     }.fold(
         onSuccess = { Result.success(it) },
         onFailure = { Result.failure(it) }
     )
+
+    /** 转存到指定目录并轮询拿到新 fid（toPdirFid 由调用方指定） */
+    private suspend fun transferFileTo(
+        session: ShareSession,
+        file: ShareFile,
+        toDirFid: String,
+        cookie: String
+    ): Result<String> = runCatching {
+        val taskId = api.saveShareFile(
+            shareId = session.shareId,
+            stoken = session.stoken,
+            pdirFid = file.pdirFid,
+            fid = file.fid,
+            fidToken = file.fidToken,
+            toPdirFid = toDirFid,
+            cookie = cookie
+        ) ?: throw IllegalStateException("转存失败")
+        api.pollTask(taskId, cookie)
+            ?: throw IllegalStateException("转存超时，请稍后重试")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
+
+    /** 下载完成后清理：删除临时子目录（连同其中的转存文件）；失败不阻断 */
+    override suspend fun cleanupTempDir(dirFid: String, cookie: String) {
+        runCatching { api.deleteFile(dirFid, cookie) }
+    }
 }

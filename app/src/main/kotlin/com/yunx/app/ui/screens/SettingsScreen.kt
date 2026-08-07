@@ -227,6 +227,24 @@ fun SettingsScreen(
                     ) {
                         Text("保存到下载目录")
                     }
+                    TextButton(
+                        onClick = {
+                            showLogDialog = false
+                            scope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    LogExporter.clearLogcat()
+                                }
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "日志缓存已清空" else "清空失败",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("清空日志缓存（logcat -c）")
+                    }
                 }
             },
             confirmButton = {

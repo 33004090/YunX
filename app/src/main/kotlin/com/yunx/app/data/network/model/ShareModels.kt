@@ -33,10 +33,12 @@ data class ShareFile(
 
 /**
  * 下载直链。
+ * @param cleanupDirFid 下载完成后需删除的临时转存子目录 fid（根治夸克去重返回已删 fid）；null 表示无需清理
  */
 data class DownloadLink(
     val fid: String,
     val filename: String,
     val downloadUrl: String,
-    val size: Long
+    val size: Long,
+    val cleanupDirFid: String? = null
 )

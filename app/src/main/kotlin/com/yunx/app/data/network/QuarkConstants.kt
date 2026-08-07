@@ -62,6 +62,9 @@ object QuarkConstants {
     /** 临时转存目录名 */
     const val TEMP_DIR_NAME = "YunX临时转存"
 
+    /** 临时转存子目录前缀（唯一子目录 tr_<时间戳>_<随机>，供启动一次性清理识别） */
+    const val TEMP_SUBDIR_PREFIX = "tr_"
+
     /** 关键 Cookie 字段，缺失则视为未登录 */
     fun isValidCookie(cookie: String?): Boolean =
         cookie != null && cookie.contains("__pus=") && cookie.contains("__puus=")

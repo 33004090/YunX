@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Process
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import java.io.BufferedReader
@@ -23,9 +24,8 @@ import java.util.Locale
 /**
  * 日志导出工具：
  * 1. 头部写入应用 / 设备信息；
- * 2. `logcat -d -v time` dump 全部运行日志（主缓冲区）；
- * 3. `logcat -b crash -d -v time` dump 崩溃日志（crash 缓冲区）；
- * 4. 合并写入 cacheDir/logs/ 下文本文件，通过 FileProvider + 系统分享导出。
+ * 2. `logcat -d -v time --pid=<当前进程>` dump 当前应用的运行日志（按包名进程过滤）；
+ * 3. 合并写入 cacheDir/logs/ 下文本文件，通过 FileProvider + 系统分享导出。
  */
 object LogExporter {
 
@@ -83,21 +83,25 @@ object LogExporter {
             writer.write("系统：Android ${Build.VERSION.RELEASE}（SDK ${Build.VERSION.SDK_INT}）\n")
             writer.write("\n")
 
-            // ---------- 运行日志：logcat 主缓冲区 ----------
-            writer.write("========== 运行日志（logcat -d -v time）==========\n")
-            dumpLogcat(writer, listOf("logcat", "-d", "-v", "time"))
-            writer.write("\n")
-
-            // ---------- 崩溃日志：logcat crash 缓冲区 ----------
-            writer.write("========== 崩溃日志（logcat -b crash -d -v time）==========\n")
-            dumpLogcat(writer, listOf("logcat", "-b", "crash", "-d", "-v", "time"))
+            // ---------- 运行日志：当前应用进程（logcat 按 pid 过滤，只保留本应用） ----------
+            writer.write("========== 运行日志（logcat -d -v time --pid=${Process.myPid()}）==========\n")
+            dumpLogcat(
+                writer,
+                listOf("logcat", "-d", "-v", "time", "--pid=${Process.myPid()}")
+            )
         }
+        true
+    }.getOrDefault(false)
+
+    /** 清空 logcat 缓冲（便于复现后只导出本次操作日志） */
+    fun clearLogcat(): Boolean = runCatching {
+        ProcessBuilder("logcat", "-c").start().waitFor()
         true
     }.getOrDefault(false)
 
     /** 执行 logcat 命令并写入 writer（仅保留最近 MAX_LINES 行） */
     private fun dumpLogcat(writer: OutputStreamWriter, command: List<String>) {
-        var process: Process? = null
+        var process: java.lang.Process? = null
         try {
             process = ProcessBuilder(command).redirectErrorStream(true).start()
             val reader =

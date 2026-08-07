@@ -279,8 +279,12 @@ class QuarkApi(
         val json = runCatching { JSONObject(bodyStr) }.getOrElse {
             throw QuarkApiException("响应解析失败")
         }
-        if (json.optInt("status") != 200) {
-            throw QuarkApiException(json.optString("message").ifBlank { "获取下载链接失败" })
+        if (json.optInt("status") != 200 && json.optInt("code") != 0) {
+            // 失败响应无 status 字段（默认0），用 code 识别（如 21001 file not found）
+            throw QuarkApiException(
+                json.optString("message").ifBlank { "获取下载链接失败" },
+                json.optInt("code")
+            )
         }
         val array = json.optJSONArray("data") ?: throw QuarkApiException("响应缺少 data")
         if (array.length() == 0) throw QuarkApiException("未返回下载链接")

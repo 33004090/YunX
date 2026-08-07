@@ -1,5 +1,6 @@
 package com.yunx.app.data.download
 
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,6 +15,8 @@ import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 
+private const val TAG = "YunX-DL"
+
 /**
  * OkHttp 分片下载器：
  * - 支持 Range 分片请求、多线程并行下载；
@@ -25,7 +28,6 @@ class ChunkDownloader(private val client: OkHttpClient) {
 
     /** 任务 id → 该任务当前所有分片请求（供暂停/删除时立即中断网络） */
     private val activeCalls = ConcurrentHashMap<Long, MutableSet<Call>>()
-
     /** 取消指定任务的所有分片请求（立即中断阻塞 IO，不依赖协程取消传播） */
     fun cancelCalls(taskId: Long) {
         activeCalls.remove(taskId)?.forEach { call ->
@@ -50,6 +52,7 @@ class ChunkDownloader(private val client: OkHttpClient) {
         try {
             runCatching {
                 call.execute().use { response ->
+                    Log.d(TAG, "getTotalSize: code=${response.code} url=${url.take(120)}")
                     if (!response.isSuccessful) return@use null
                     // Content-Range: bytes 0-0/123456
                     response.header("Content-Range")
@@ -82,6 +85,7 @@ class ChunkDownloader(private val client: OkHttpClient) {
         val total = end - start + 1
         // 分片已完整下载
         if (existing >= total) return@withContext true
+        Log.d(TAG, "downloadChunk: task=$taskId range=$from-$end total=$total 已有=$existing")
 
         val request = Request.Builder()
             .url(url)
@@ -98,7 +102,11 @@ class ChunkDownloader(private val client: OkHttpClient) {
         try {
             call.execute().use { response ->
                 // 206 分片响应；200 表示服务器忽略 Range（仅允许 start=0 单片场景）
-                if (response.code != 206 && !(response.code == 200 && start == 0L)) return@use false
+                if (response.code != 206 && !(response.code == 200 && start == 0L)) {
+                    Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end 非预期状态码 ${response.code}")
+                    return@use false
+                }
+                Log.d(TAG, "downloadChunk: task=$taskId range=$from-$end code=${response.code} 下载中")
                 val body = response.body ?: return@use false
                 RandomAccessFile(partFile, "rw").use { raf ->
                     raf.seek(existing)
@@ -117,6 +125,7 @@ class ChunkDownloader(private val client: OkHttpClient) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {
+            Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end IO异常: ${e.message}")
             // 协程已被取消（暂停/删除）：网络中断属于正常取消，向上传播，
             // 不能让外层误判为"分片下载失败"而覆盖 PAUSED 状态
             if (!isActive) throw CancellationException("下载被取消", e)
@@ -129,7 +138,7 @@ class ChunkDownloader(private val client: OkHttpClient) {
 
     /** 按顺序合并分片为完整文件 */
     suspend fun mergeChunks(chunkFiles: List<File>, target: File): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
+        val ok = runCatching {
             target.parentFile?.mkdirs()
             target.outputStream().use { out ->
                 chunkFiles.forEach { part ->
@@ -140,5 +149,7 @@ class ChunkDownloader(private val client: OkHttpClient) {
             }
             true
         }.getOrDefault(false)
+        Log.d(TAG, "mergeChunks: parts=${chunkFiles.size} target=$target ok=$ok")
+        ok
     }
 }

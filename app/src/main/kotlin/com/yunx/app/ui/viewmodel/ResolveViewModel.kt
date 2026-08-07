@@ -10,6 +10,7 @@ import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.BaiduConstants
 import com.yunx.app.data.network.C139Constants
 import com.yunx.app.data.network.QuarkConstants
+import com.yunx.app.data.network.QuarkCdn
 import com.yunx.app.data.network.ShareLinkParser
 import com.yunx.app.data.network.SharePlatform
 import com.yunx.app.data.network.UCConstants
@@ -29,6 +30,7 @@ import com.yunx.app.data.repository.UCResolveRepository
 import com.yunx.app.data.repository.XunleiAccountRepository
 import com.yunx.app.data.repository.XunleiResolveRepository
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed interface ResolveUiState {
     data object Idle : ResolveUiState
@@ -229,16 +231,29 @@ class ResolveViewModel(
     }
 
     fun dismissDownloadDialog() {
+        val link = downloadLink
         downloadLink = null
+        // 弹窗被关闭（用户点管壁/「关闭」，未开始下载）：清理夸克临时转存，避免云端残留
+        if (link?.cleanupDirFid != null) {
+            viewModelScope.launch {
+                val credential = currentCredential() ?: return@launch
+                link.cleanupDirFid?.let { dirFid ->
+                    currentRepo().cleanupTempDir(dirFid, credential)
+                }
+            }
+        }
     }
 
-    /** 将直链加入下载队列（携带对应平台凭证与 UA） */
+    /** 将直链加入下载队列（携带对应平台凭证与 UA；夸克直链做 CDN 节点优选） */
     fun startDownload(link: DownloadLink) {
         viewModelScope.launch {
+            // 开始下载：先关闭弹窗（临时转存由下载完成 onComplete 清理，不在此时删）
+            downloadLink = null
             val isUC = currentPlatform == SharePlatform.UC
             val isXunlei = currentPlatform == SharePlatform.XUNLEI
             val isBaidu = currentPlatform == SharePlatform.BAIDU
             val isC139 = currentPlatform == SharePlatform.C139
+            val isQuark = currentPlatform == SharePlatform.QUARK
             val credential = currentCredential()
             if (credential.isNullOrBlank()) {
                 downloadError = "请先登录网盘"
@@ -257,11 +272,24 @@ class ResolveViewModel(
                     "User-Agent" to if (isUC) UCConstants.USER_AGENT else QuarkConstants.API_USER_AGENT
                 )
             }
+            // 夸克直链：并发探测最近 CDN 节点（dl-pc-sz → 就近），失败自动回退原链接
+            val effectiveUrl = if (isQuark) {
+                withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    QuarkCdn.fastest(link.downloadUrl, credential)
+                }
+            } else {
+                link.downloadUrl
+            }
             downloadManager.enqueue(
-                url = link.downloadUrl,
+                url = effectiveUrl,
                 fileName = link.filename,
-                headers = headers
-                // 百度取链时（getShareDownloadLink）已立即删除临时转存，下载环节无需再清理
+                headers = headers,
+                // 下载成功完成后：清理夸克临时转存子目录（根治 21001；其它平台 cleanupDirFid 为 null 自动跳过）
+                onComplete = {
+                    link.cleanupDirFid?.let { dirFid ->
+                        currentRepo().cleanupTempDir(dirFid, credential)
+                    }
+                }
             )
             downloadStarted = true
         }

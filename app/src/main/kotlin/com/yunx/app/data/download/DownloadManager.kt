@@ -1,6 +1,7 @@
 package com.yunx.app.data.download
 
 import android.content.Context
+import android.util.Log
 import com.yunx.app.data.db.DownloadTaskDao
 import com.yunx.app.data.db.DownloadTaskEntity
 import kotlinx.coroutines.CancellationException
@@ -36,6 +37,8 @@ data class DownloadStats(
     val remainMillis: Long = -1L, // 剩余时间（毫秒），未知为 -1
     val chunkCount: Int = 1       // 分片（线程）数
 )
+
+private const val TAG = "YunX-DL"
 
 /**
  * 下载任务管理器：
@@ -91,6 +94,7 @@ class DownloadManager(
             url.substringAfterLast('/').substringBefore('?')
                 .ifBlank { "download_${System.currentTimeMillis()}" }
         }
+        Log.d(TAG, "enqueue: url=$url fileName=$safeName headers=${headers.keys}")
         val id = dao.insert(
             DownloadTaskEntity(
                 url = url,
@@ -108,6 +112,7 @@ class DownloadManager(
     fun start(id: Long, headers: Map<String, String> = emptyMap()) {
         // 恢复时未传 headers：沿用入队时保存的（Cookie/UA 对直链下载是必需的）
         val effectiveHeaders = headers.ifEmpty { taskHeaders[id] ?: emptyMap() }
+        Log.d(TAG, "start: id=$id headers=${effectiveHeaders.keys}")
         synchronized(jobsLock) {
             // 原子注册：检查 + 占位 + launch + complete 在同一锁内完成，
             // pause/remove 要么拿到已注册的 job，要么拿不到（视为未运行）
@@ -134,8 +139,11 @@ class DownloadManager(
                     _stats.update { it - id }
                     // 协程已被取消（暂停/删除）：不标记失败，避免覆盖 PAUSED 状态
                     if (isTaskActive()) {
+                        Log.e(TAG, "task $id failed: ${e.message ?: e.javaClass.simpleName}", e)
                         dao.updateStatus(id, DownloadTaskEntity.STATUS_FAILED)
                         dao.updateError(id, e.message ?: e.javaClass.simpleName)
+                    } else {
+                        Log.w(TAG, "task $id cancelled: ${e.message}")
                     }
                 } finally {
                     // 只移除自己注册的 deferred：
@@ -155,6 +163,7 @@ class DownloadManager(
 
     /** 暂停下载（保留 part 文件与请求头） */
     fun pause(id: Long) {
+        Log.d(TAG, "pause: id=$id")
         // 立即中断该任务所有分片网络请求（不依赖协程取消传播，阻塞 IO 马上停止）
         downloader.cancelCalls(id)
         val deferred = synchronized(jobsLock) { activeJobs.remove(id) }
@@ -174,6 +183,7 @@ class DownloadManager(
      * @param deleteLocal 同时删除已保存到本地的文件（savePath）
      */
     fun remove(id: Long, deleteLocal: Boolean = false) {
+        Log.d(TAG, "remove: id=$id deleteLocal=$deleteLocal")
         // 立即中断该任务所有分片网络请求
         downloader.cancelCalls(id)
         _stats.update { it - id }
@@ -209,9 +219,11 @@ class DownloadManager(
         if (!isTaskActive()) return
         val task = dao.get(id) ?: return
         dao.updateStatus(id, DownloadTaskEntity.STATUS_DOWNLOADING)
+        Log.d(TAG, "runTask: id=$id fileName=${task.fileName}")
 
         val total = downloader.getTotalSize(task.url, headers)
             ?: throw IllegalStateException("无法获取文件大小")
+        Log.d(TAG, "getTotalSize: id=$id total=$total url=${task.url.take(120)}")
         dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, task.downloadedSize, total)
         // 取到大小后再次检查取消（暂停可能发生在 getTotalSize 期间）
         if (!isTaskActive()) return
@@ -219,6 +231,7 @@ class DownloadManager(
         val chunkCount = chunkCountFor(total)
         val chunkSize = ceil(total.toDouble() / chunkCount).toLong()
         val chunkDir = chunkDirOf(id).apply { mkdirs() }
+        Log.d(TAG, "分片规划: id=$id chunks=$chunkCount size=$chunkSize threads=${threadProvider().coerceAtLeast(1)}")
 
         // 注册实时统计：线程数 = 用户设置的线程数（非分片数）
         val threadCount = threadProvider().coerceAtLeast(1)
@@ -279,7 +292,11 @@ class DownloadManager(
             }.awaitAll()
             results.all { it }
         }
-        if (!allOk) throw IllegalStateException(failedReason.get() ?: "分片下载失败")
+        if (!allOk) {
+            Log.e(TAG, "runTask: id=$id 分片下载失败 reason=${failedReason.get()}")
+            throw IllegalStateException(failedReason.get() ?: "分片下载失败")
+        }
+        Log.d(TAG, "runTask: id=$id 所有分片下载完成，开始合并")
         // 下载完成但已取消（删除/暂停发生在合并前）：不再合并保存
         if (!isTaskActive()) return
 
@@ -287,6 +304,7 @@ class DownloadManager(
         val merged = File(context.cacheDir, "merged_$id")
         val chunkFiles = (0 until chunkCount).map { i -> File(chunkDir, "part_$i") }
         if (!downloader.mergeChunks(chunkFiles, merged)) {
+            Log.e(TAG, "runTask: id=$id 合并分片失败")
             throw IllegalStateException("合并分片失败")
         }
         // 合并完成但已取消（删除发生在合并期间）：不保存，避免向公共目录写入残留文件
@@ -296,6 +314,7 @@ class DownloadManager(
         val savedPath = DownloadSaver.save(context, task.fileName, merged)
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
+        Log.d(TAG, "runTask: id=$id 下载完成 savedPath=$savedPath")
 
         // 下载成功：触发清理回调（删除网盘临时转存文件等）；失败/取消不触发
         taskCallbacks.remove(id)?.let { cb ->

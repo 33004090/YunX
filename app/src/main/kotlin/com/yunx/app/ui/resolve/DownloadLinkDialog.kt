@@ -4,11 +4,14 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.AlertDialog
@@ -26,14 +29,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import com.yunx.app.data.network.model.DownloadLink
 
 /**
- * 下载直链弹窗：展示文件名与直链，支持「开始下载」（分片多线程下载）与「复制链接」。
+ * 下载直链弹窗：展示文件名与直链（长按直链复制），支持「开始下载」（分片多线程下载）。
+ * 点「关闭」或弹窗外（管壁）关闭 = 放弃下载，由上层清理临时转存。
  */
 @Composable
 fun DownloadLinkDialog(
@@ -70,7 +70,15 @@ fun DownloadLinkDialog(
                 ) {
                     Text(
                         text = link.downloadUrl,
-                        modifier = Modifier.padding(12.dp),
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .combinedClickable(
+                                onClick = {},
+                                onLongClick = {
+                                    copyToClipboard(context, link.downloadUrl)
+                                    Toast.makeText(context, "下载链接已复制", Toast.LENGTH_SHORT).show()
+                                }
+                            ),
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
@@ -83,7 +91,7 @@ fun DownloadLinkDialog(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "点击「开始下载」将分片多线程下载并保存到 Download 目录",
+                    text = "长按链接可复制；点击「开始下载」将分片多线程下载并保存到 Download 目录",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -91,10 +99,7 @@ fun DownloadLinkDialog(
         },
         confirmButton = {
             Button(
-                onClick = {
-                    onDownload()
-                    onDismiss()
-                }
+                onClick = { onDownload() }
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Download,
@@ -106,18 +111,8 @@ fun DownloadLinkDialog(
             }
         },
         dismissButton = {
-            Row {
-                TextButton(
-                    onClick = {
-                        copyToClipboard(context, link.downloadUrl)
-                        Toast.makeText(context, "下载链接已复制", Toast.LENGTH_SHORT).show()
-                    }
-                ) {
-                    Text("复制链接")
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("关闭")
-                }
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
             }
         },
         modifier = modifier

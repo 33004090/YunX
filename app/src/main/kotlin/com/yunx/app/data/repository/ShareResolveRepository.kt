@@ -29,4 +29,10 @@ interface ShareResolveRepository {
         file: ShareFile,
         cookie: String
     ): Result<DownloadLink>
+
+    /**
+     * 下载完成后清理临时转存目录（夸克实现删除 tr_* 子目录；其它平台默认空实现）。
+     * @param dirFid DownloadLink.cleanupDirFid 带回的临时目录 fid
+     */
+    suspend fun cleanupTempDir(dirFid: String, cookie: String) {}
 }
