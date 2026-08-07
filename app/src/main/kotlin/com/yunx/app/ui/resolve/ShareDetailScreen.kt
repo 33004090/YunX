@@ -2,6 +2,7 @@ package com.yunx.app.ui.resolve
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -93,35 +94,12 @@ fun ShareDetailScreen(
                         )
                     }
                 }
-                // 当前路径（面包屑）：/ 或 /辅助工具/专用模组/
-                // 可横向滚动，并始终定位到末尾（当前所在目录）
-                val pathText = if (pathNames.isEmpty()) "/"
-                else "/" + pathNames.joinToString("/") + "/"
-                val pathScroll = rememberScrollState()
-                LaunchedEffect(pathText) {
-                    pathScroll.scrollTo(pathScroll.maxValue)
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .padding(start = 8.dp, top = 2.dp)
-                        .fillMaxWidth()
-                        .horizontalScroll(pathScroll)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.FolderOpen,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = pathText,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1
-                    )
-                }
+                // 可点击面包屑：分享名(根) > 目录1 > 目录2（点任意层级回退到该目录；当前层高亮）
+                CrumbBar(
+                    session = session,
+                    pathNames = pathNames,
+                    onNavigate = { viewModel.navigateToLevel(it) }
+                )
             }
         }
 
@@ -186,6 +164,74 @@ private fun BackToParentItem(onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium
             )
+        }
+    }
+}
+
+/**
+ * 可点击面包屑：分享名(根) > 目录1 > 目录2。
+ * 非当前层可点击回退到对应目录；当前层高亮（文件夹图标 + 主题色）。
+ * 横向滚动并自动定位到当前层。
+ */
+@Composable
+private fun CrumbBar(
+    session: ShareSession,
+    pathNames: List<String>,
+    onNavigate: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val crumbs = buildList {
+        add(session.title.ifBlank { "分享内容" })
+        pathNames.forEach { add(it) }
+    }
+    val scroll = rememberScrollState()
+    LaunchedEffect(crumbs.size, crumbs.lastOrNull()) {
+        scroll.scrollTo(scroll.maxValue)
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(scroll)
+            .padding(start = 8.dp, top = 4.dp)
+    ) {
+        crumbs.forEachIndexed { i, name ->
+            val isLast = i == crumbs.size - 1
+            if (!isLast) {
+                // 可点击层级：点击回退到该目录
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .clickable { onNavigate(i) }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+                Icon(
+                    imageVector = Icons.Outlined.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.outline
+                )
+            } else {
+                // 当前层：高亮 + 文件夹图标（不可点）
+                Icon(
+                    imageVector = Icons.Outlined.FolderOpen,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    modifier = Modifier.padding(end = 4.dp)
+                )
+            }
         }
     }
 }

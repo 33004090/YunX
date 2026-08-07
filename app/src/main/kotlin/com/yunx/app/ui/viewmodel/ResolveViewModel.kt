@@ -204,6 +204,24 @@ class ResolveViewModel(
         uiState = ResolveUiState.Idle
     }
 
+    /**
+     * 面包屑导航：点击第 level 级（0=分享根目录）回退到该目录并刷新列表。
+     * 当前所在层（level == pathNames.size）无需操作。
+     */
+    fun navigateToLevel(level: Int) {
+        val s = session ?: return
+        if (level < 0 || level > pathNames.size) return
+        if (level == pathNames.size) return
+        // 弹出目录栈直到对应层级；level=0 时回到分享根目录
+        while (dirStack.size > level) dirStack.removeLast()
+        currentDirFid = if (dirStack.isEmpty()) currentDefaultDirFid() else dirStack.last()
+        pathNames = pathNames.take(level)
+        viewModelScope.launch {
+            val credential = currentCredential() ?: return@launch
+            loadFiles(s, currentDirFid, credential, currentRepo())
+        }
+    }
+
     /** 获取文件下载直链（各平台实现不同：夸克转存后取 / UC 直接取 / 迅雷转存后取详情直链） */
     fun fetchDownloadLink(file: ShareFile) {
         viewModelScope.launch {

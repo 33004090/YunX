@@ -91,7 +91,7 @@ fun DownloadLinkDialog(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "长按链接可复制；点击「开始下载」将分片多线程下载并保存到 Download 目录",
+                    text = "点击「开始下载」将分片多线程下载并保存到 Download 目录",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
