@@ -15,8 +15,8 @@ android {
         applicationId = "com.yunx.app"
         minSdk = 21
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.9"
+        versionCode = 3
+        versionName = "1.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

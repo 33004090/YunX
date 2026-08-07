@@ -25,9 +25,14 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
             val parsed = ShareLinkParser.parse(link)
                 ?: throw IllegalArgumentException("无法识别百度分享链接")
             val surl = parsed.shareId
+            // 修复：公共分享（pwd 为空）不强制提取码——跳过 verify，sekey 置空，
+            // listShare 将不带 sekey 直接列出（抓包实证：公共分享无需 sekey/Cookie 即 errno=0）
             val effectivePwd = pwd?.takeIf { it.isNotBlank() } ?: parsed.pwd
-                ?: throw IllegalArgumentException("该分享需要提取码")
-            val sekey = api.verifyShare(surl, effectivePwd, cookie)
+            val sekey = if (effectivePwd.isNullOrBlank()) {
+                ""
+            } else {
+                api.verifyShare(surl, effectivePwd, cookie)
+            }
             sekeys[surl] = sekey
             ShareSession(surl, sekey, "")
         }.fold(

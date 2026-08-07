@@ -127,31 +127,47 @@ class BaiduApi(
         }
 
     /**
-     * 列出分享文件：GET xpan/share?method=list。
-     * @param dir 分享内目录路径，根目录传 "/"（子目录传 "/folder"）
-     * @return 文件列表 + share_id/uk（转存需要）
-     */
-    suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String): BaiduShareList =
-        withContext(Dispatchers.IO) {
-            val url = "https://pan.baidu.com/rest/2.0/xpan/share?method=list" +
-                "&shorturl=$surl&page=1&num=100&root=1&dir=" +
-                URLEncoder.encode(if (dir.isBlank()) "/" else dir, "UTF-8") +
-                "&sekey=$sekey"
-            val request = Request.Builder()
-                .url(url)
-                .header("Cookie", cookie)
-                .header("User-Agent", BaiduConstants.UA_WEB)
-                .header("Referer", "https://pan.baidu.com/s/$surl")
-                .get()
-                .build()
-            val json = executeJson(request)
+ * 列出分享文件：GET xpan/share?method=list。
+ * 修复（文档《百度网盘解析问题修复》）：
+ *  - 顶层 root=1，子目录 root=0（root=1 下百度忽略 dir → 子文件夹进不去）；
+ *  - 子目录（root=0）必须携带 BDCLND cookie（= verify 返回的 randsk），否则 errno=2；
+ *  - sekey 为空（公共分享）时省略 &sekey= 参数；
+ *  - 无 sekey 却 errno!=0 → 实为加密分享，抛"该分享需要提取码"。
+ * @param dir 分享内目录路径，根目录传 "/"（子目录传 "/folder"）
+ * @return 文件列表 + share_id/uk（转存需要）
+ */
+suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String): BaiduShareList =
+    withContext(Dispatchers.IO) {
+        val isRoot = dir.isBlank() || dir == "/"
+        val root = if (isRoot) "1" else "0"
+        val sekeyPart = if (sekey.isNotBlank()) "&sekey=$sekey" else ""
+        val url = "https://pan.baidu.com/rest/2.0/xpan/share?method=list" +
+            "&shorturl=$surl&page=1&num=100&root=$root&dir=" +
+            URLEncoder.encode(if (dir.isBlank()) "/" else dir, "UTF-8") +
+            sekeyPart
+        // 子目录(root=0)必须携带 BDCLND（= verify 的 randsk），否则 errno=2；顶层(root=1)无需
+        val authCookie = if (sekey.isNotBlank() && !cookie.contains("BDCLND="))
+            "$cookie; BDCLND=$sekey" else cookie
+        val request = Request.Builder()
+            .url(url)
+            .header("Cookie", authCookie)
+            .header("User-Agent", BaiduConstants.UA_WEB)
+            .header("Referer", "https://pan.baidu.com/s/$surl")
+            .get()
+            .build()
+        val json = executeJson(request)
+        val errno = json.optInt("errno")
+        if (errno != 0) {
+            // 无 sekey 却失败 → 实为加密分享，提示用户索取提取码
+            if (sekey.isBlank()) throw BaiduApiException("该分享需要提取码")
             checkErrno(json, "获取分享文件列表失败")
-            val array = json.optJSONArray("list") ?: org.json.JSONArray()
-            val files = buildList {
-                for (i in 0 until array.length()) {
-                    val item = array.optJSONObject(i) ?: continue
-                    val isdir = item.optString("isdir") == "1"
-                    val path = item.optString("path")
+        }
+        val array = json.optJSONArray("list") ?: org.json.JSONArray()
+        val files = buildList {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val isdir = item.optString("isdir") == "1"
+                val path = item.optString("path")
                     add(
                         ShareFile(
                             // 目录用 path 作 fid（导航传参），文件用 fs_id（转存传参）
