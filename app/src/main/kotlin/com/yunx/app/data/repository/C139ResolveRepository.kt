@@ -21,10 +21,14 @@ class C139ResolveRepository(private val api: C139Api) : ShareResolveRepository {
             return Result.failure(IllegalStateException("登录态缺少账号信息，请重新登录"))
         }
         return runCatching {
-            // 139 分享无 token：shareId 即 linkID，stoken 暂存提取码；标题从 getOutLinkGeneral 拿（失败回退短链 ID）
+            // 139 分享无 token：shareId 即 linkID，stoken 暂存提取码
+            // 密码优先级：用户手输 > 139 getOutLinkGeneral 明文回吐的 passwd（避免下载因缺密码报 9188）
+            val leakedPwd = api.getOutLinkPassword(parsed.shareId)
+            val passwd = pwd?.takeIf { it.isNotBlank() } ?: leakedPwd.orEmpty()
+            // 标题从 getOutLinkGeneral 拿（失败回退短链 ID）
             val title = api.getOutLinkTitle(parsed.shareId)
                 ?.takeIf { it.isNotBlank() } ?: parsed.shareId
-            ShareSession(parsed.shareId, pwd.orEmpty(), title)
+            ShareSession(parsed.shareId, passwd, title)
         }.fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(it) }
@@ -34,11 +38,10 @@ class C139ResolveRepository(private val api: C139Api) : ShareResolveRepository {
     override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
         runCatching {
             // 列表端点为匿名调用（§9530修复文档 §3）：无需 authorization/account，Api 内部走匿名请求
-            // pCaID 根目录必须传 "root"（§16.2：空串会报 pCaID不能为空），子目录传父 coID
+            // pCaID 根目录必须传 "root"（§16.2：空串会报 pCaID不能为空），子目录传父 caID / coID
             val pcaId = if (dirFid == "0" || dirFid.isBlank()) "root" else dirFid
             // passwd = 分享提取码（createSession 时存入 stoken；无则空串）
             api.getShareFiles(session.shareId, pcaId, session.stoken)
-                ?: throw IllegalStateException("未获取到文件列表")
         }.fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(it) }

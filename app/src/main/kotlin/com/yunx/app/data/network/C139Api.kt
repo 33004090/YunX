@@ -145,18 +145,42 @@ class C139Api(
     }
 
     /**
+     * 分享明文提取码：getOutLinkGeneral（匿名）→ outLinkGeneral[].passwd。
+     * 139 会在该接口明文回吐提取码（官方 Web 同样自动填），用于自动填入、避免下载因缺密码报 9188。
+     */
+    suspend fun getOutLinkPassword(linkId: String): String? = withContext(Dispatchers.IO) {
+        val req = JSONObject()
+            .put("linkID", linkId)
+            .put("isPasswd", 1)
+            .put("account", "")
+        val plain = JSONObject().put("getOutLinkGeneralReq", req).toString()
+        val respJson = sharePostAnonymous(C139Constants.SHARE_GENERAL_URL, plain)
+        val resultCode = respJson.optString("resultCode")
+        if (resultCode.isNotBlank() && resultCode != "0") return@withContext null
+        if (!respJson.optBoolean("success", true)) return@withContext null
+        val data = respJson.optJSONObject("data")
+            ?.optJSONObject("getOutLinkGeneralResp") ?: return@withContext null
+        val array = data.optJSONArray("outLinkGeneral") ?: return@withContext null
+        if (array.length() == 0) return@withContext null
+        array.optJSONObject(0)?.optString("passwd")?.takeIf { it.isNotBlank() }
+    }
+
+    /**
      * 分享列目录：getOutLinkInfoV6 —— 官方为「匿名」调用（§9530修复文档 §2/§3）：
      * 不带 authorization、不带 mcloud-sign、不带 mcloud-* 头；body account 固定空串；
      * 带完整字段（caSrt/coSrt/srtDr/bNum/eNum），否则 9530；passwd 填错返回 9188。
-     * @param pcaId 根目录传 "root"（不能为空，§16.2），子目录传父目录 coID
+     * ⚠️ 139 把【子文件夹】放在 caLst、【文件】放在 coLst（coType==2 也可能是文件夹）。
+     *    原实现只读了 coLst，导致「顶层是文件夹 / 顶层只挂子文件夹」的分享显示为空。
+     *    现同时解析 caLst + coLst 并合并返回（文件夹在前）。
+     * @param pcaId 根目录传 "root"（不能为空，§16.2），子目录传父级 caID（或 coType==2 的 coID）
      * @param passwd 提取码（无则空串）
-     * @return data.coLst[] → ShareFile（fid=coID）
+     * @return 文件夹（caLst）+ 文件/嵌套文件夹（coLst）合并列表；空目录返回 emptyList
      */
     suspend fun getShareFiles(
         linkId: String,
         pcaId: String,
         passwd: String
-    ): List<ShareFile>? = withContext(Dispatchers.IO) {
+    ): List<ShareFile> = withContext(Dispatchers.IO) {
         val req = JSONObject()
             .put("account", "")            // 列表端点 account 必须为空串，且本调用不带鉴权头（§3）
             .put("linkID", linkId)
@@ -176,20 +200,45 @@ class C139Api(
         if (!respJson.optBoolean("success", true)) {
             throw IllegalStateException(respJson.optString("desc").ifBlank { "获取文件列表失败" })
         }
-        val data = respJson.optJSONObject("data") ?: return@withContext null
-        val array = data.optJSONArray("coLst") ?: return@withContext emptyList()
-        (0 until array.length()).map { i ->
-            val item = array.optJSONObject(i)
-            ShareFile(
-                fid = item.optString("coID"),
-                fname = item.optString("coName"),
-                fsize = item.optLong("coSize"),
-                isdir = item.optBoolean("isdir", item.optInt("coType", 1) == 2),
-                pdirFid = pcaId,
-                fidToken = "",
-                modifyTime = ""
-            )
+        val data = respJson.optJSONObject("data") ?: return@withContext emptyList()
+        val result = mutableListOf<ShareFile>()
+
+        // 1) 子文件夹列表 caLst（之前被完全忽略 → 根因：含子文件夹的分享显示为空）
+        data.optJSONArray("caLst")?.let { ca ->
+            for (i in 0 until ca.length()) {
+                val item = ca.optJSONObject(i) ?: continue
+                result.add(
+                    ShareFile(
+                        fid = item.optString("caID"),
+                        fname = item.optString("caName"),
+                        fsize = 0,
+                        isdir = true,
+                        pdirFid = pcaId,
+                        fidToken = "",
+                        modifyTime = item.optString("udTime").ifBlank { item.optString("ctTime") }
+                    )
+                )
+            }
         }
+
+        // 2) 文件列表 coLst（含 coType==2 的文件夹）
+        data.optJSONArray("coLst")?.let { co ->
+            for (i in 0 until co.length()) {
+                val item = co.optJSONObject(i) ?: continue
+                result.add(
+                    ShareFile(
+                        fid = item.optString("coID"),
+                        fname = item.optString("coName"),
+                        fsize = item.optLong("coSize"),
+                        isdir = item.optBoolean("isdir", item.optInt("coType", 1) == 2),
+                        pdirFid = pcaId,
+                        fidToken = "",
+                        modifyTime = item.optString("udTime").ifBlank { item.optString("ctTime") }
+                    )
+                )
+            }
+        }
+        result   // 空目录返回 emptyList，UI 显示「此目录为空」（保持原语义）
     }
 
     /**
