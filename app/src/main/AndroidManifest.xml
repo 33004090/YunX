@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- APK 安装：Android 8+ 检查「安装未知来源应用」权限需要 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Android 9- 写公共 Download 目录需要（10+ 走 MediaStore 无需权限） -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"

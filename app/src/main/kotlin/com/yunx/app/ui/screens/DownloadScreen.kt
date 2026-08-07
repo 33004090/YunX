@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -312,10 +314,22 @@ private fun DownloadTaskCard(
                     DownloadTaskEntity.STATUS_FAILED -> IconButton(onClick = onResume) {
                         Icon(Icons.Outlined.Refresh, contentDescription = "重试", tint = MaterialTheme.colorScheme.error)
                     }
-                    DownloadTaskEntity.STATUS_COMPLETED -> IconButton(onClick = {
-                        openSavedFile(context, task.savePath)
-                    }) {
-                        Icon(Icons.Outlined.OpenInNew, contentDescription = "打开", tint = MaterialTheme.colorScheme.primary)
+                                        DownloadTaskEntity.STATUS_COMPLETED -> Row {
+                        // APK 文件：额外显示「安装」按钮
+                        if (task.fileName.endsWith(".apk", true)) {
+                            IconButton(onClick = { installApk(context, task.savePath, task.fileName) }) {
+                                Icon(
+                                    imageVector = Icons.Outlined.SystemUpdate,
+                                    contentDescription = "安装",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        IconButton(onClick = {
+                            openSavedFile(context, task.savePath)
+                        }) {
+                            Icon(Icons.Outlined.OpenInNew, contentDescription = "打开", tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
             }
@@ -447,6 +461,42 @@ private fun openSavedFile(context: android.content.Context, savePath: String) {
         context.startActivity(Intent.createChooser(intent, "打开文件"))
     }.onFailure {
         Toast.makeText(context, "无法打开该文件", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** 安装 APK：检查「安装未知来源应用」权限（Android 8+），ACTION_VIEW 调起系统安装器 */
+private fun installApk(context: android.content.Context, savePath: String, fileName: String) {
+    if (savePath.isBlank()) {
+        Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+        return
+    }
+    // Android 8+：需先授予「安装未知来源应用」
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        !context.packageManager.canRequestPackageInstalls()
+    ) {
+        Toast.makeText(context, "请先允许安装未知来源应用", Toast.LENGTH_SHORT).show()
+        val intent = Intent(
+            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            Uri.parse("package:${context.packageName}")
+        )
+        runCatching { context.startActivity(intent) }.onFailure {
+            Toast.makeText(context, "无法打开设置", Toast.LENGTH_SHORT).show()
+        }
+        return
+    }
+    val uri = if (savePath.startsWith("content://")) {
+        Uri.parse(savePath)
+    } else {
+        Uri.fromFile(File(savePath))
+    }
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "application/vnd.android.package-archive")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching {
+        context.startActivity(Intent.createChooser(intent, "安装应用"))
+    }.onFailure {
+        Toast.makeText(context, "无法打开安装器", Toast.LENGTH_SHORT).show()
     }
 }
 
