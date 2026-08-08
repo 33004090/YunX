@@ -437,7 +437,8 @@ class C139Api(
         if (url.isBlank()) return@withContext null
         DownloadLink(
             fid = fileId,
-            filename = data.optString("name").ifBlank { fileId },
+            // getDownloadUrl 响应不含 name（§4.6 仅 url/expiration/size）；文件名由调用方用列表 name 填充
+            filename = data.optString("name"),
             downloadUrl = url,
             size = data.optLong("size")
         )

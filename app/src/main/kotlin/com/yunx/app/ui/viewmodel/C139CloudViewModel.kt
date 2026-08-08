@@ -207,14 +207,15 @@ class C139CloudViewModel(
                     ?: throw IllegalStateException("获取下载链接失败")
                 downloadManager.enqueue(
                     url = link.downloadUrl,
-                    fileName = link.filename.ifBlank { file.fname },
+                    // 139 getDownloadUrl 响应不含 name → 用列表里的文件名（与分享链接下载一致，避免 fileId 乱码）
+                    fileName = file.fname.ifBlank { link.filename },
                     size = link.size,
                     headers = mapOf(
                         "User-Agent" to C139Constants.PC_UA,
                         "Referer" to "https://yun.139.com/"
                     )
                 )
-                cloudMessage = "已加入下载：${link.filename.ifBlank { file.fname }}"
+                cloudMessage = "已加入下载：${file.fname}"
                 actionFile = null
                 downloadTriggered++
             } catch (e: Exception) {
@@ -318,7 +319,8 @@ class C139CloudViewModel(
                         val link = api.getDownloadUrl(file.fid, cookie()) ?: return@runCatching
                         downloadManager.enqueue(
                             url = link.downloadUrl,
-                            fileName = link.filename.ifBlank { file.fname },
+                            // 139 getDownloadUrl 响应不含 name → 用列表里的文件名（避免 fileId 乱码）
+                            fileName = file.fname.ifBlank { link.filename },
                             size = link.size,
                             headers = mapOf(
                                 "User-Agent" to C139Constants.PC_UA,
