@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -262,7 +263,9 @@ internal fun ShareFileRow(
     file: ShareFile,
     onClick: () -> Unit,
     /** 非空时行尾显示「转存」按钮 */
-    onSave: (() -> Unit)? = null
+    onSave: (() -> Unit)? = null,
+    /** 非空时行尾显示「更多」按钮（打开文件操作菜单） */
+    onMore: (() -> Unit)? = null
 ) {
     Card(
         onClick = onClick,
@@ -323,6 +326,16 @@ internal fun ShareFileRow(
                         contentDescription = "转存",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            if (onMore != null) {
+                IconButton(onClick = onMore, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        imageVector = Icons.Outlined.MoreVert,
+                        contentDescription = "更多",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

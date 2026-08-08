@@ -69,6 +69,9 @@ class DownloadManager(
     /** 任务请求头（Cookie/UA），暂停后恢复仍需使用 */
     private val taskHeaders = ConcurrentHashMap<Long, Map<String, String>>()
 
+    /** 已知文件大小（API 返回，避免探测失败）；-1 表示未知 */
+    private val taskSizes = ConcurrentHashMap<Long, Long>()
+
     /** 任务下载完成后的清理回调（如删除网盘临时转存文件；下载成功后才触发） */
     private val taskCallbacks = ConcurrentHashMap<Long, suspend () -> Unit>()
 
@@ -86,6 +89,8 @@ class DownloadManager(
         url: String,
         fileName: String,
         headers: Map<String, String> = emptyMap(),
+        /** 已知文件大小（字节）；-1 表示未知，需探测 */
+        size: Long = -1L,
         /** 下载成功完成后的清理回调（如删除网盘临时转存文件）；失败/取消不触发 */
         onComplete: suspend () -> Unit = {}
     ): Long {
@@ -94,7 +99,7 @@ class DownloadManager(
             url.substringAfterLast('/').substringBefore('?')
                 .ifBlank { "download_${System.currentTimeMillis()}" }
         }
-        Log.d(TAG, "enqueue: url=$url fileName=$safeName headers=${headers.keys}")
+        Log.d(TAG, "enqueue: url=$url fileName=$safeName headers=${headers.keys} size=$size")
         val id = dao.insert(
             DownloadTaskEntity(
                 url = url,
@@ -103,6 +108,7 @@ class DownloadManager(
         )
         // 保存请求头（Cookie/UA），暂停后恢复仍需携带
         if (headers.isNotEmpty()) taskHeaders[id] = headers
+        if (size > 0) taskSizes[id] = size
         taskCallbacks[id] = onComplete
         start(id, headers)
         return id
@@ -221,8 +227,14 @@ class DownloadManager(
         dao.updateStatus(id, DownloadTaskEntity.STATUS_DOWNLOADING)
         Log.d(TAG, "runTask: id=$id fileName=${task.fileName}")
 
-        val total = downloader.getTotalSize(task.url, headers)
-            ?: throw IllegalStateException("无法获取文件大小")
+        val total = taskSizes[id]?.takeIf { it > 0 }
+            ?: downloader.getTotalSize(task.url, headers)
+        if (total == null) {
+            // 服务器不返回文件大小（Range/Content-Length 均缺失）：降级为流式下载（开放区间 Range）
+            Log.w(TAG, "runTask: id=$id 无法获取总大小，降级流式下载 url=${task.url.take(120)}")
+            streamDownload(id, task, headers)
+            return
+        }
         Log.d(TAG, "getTotalSize: id=$id total=$total url=${task.url.take(120)}")
         dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, task.downloadedSize, total)
         // 取到大小后再次检查取消（暂停可能发生在 getTotalSize 期间）
@@ -294,34 +306,94 @@ class DownloadManager(
         }
         if (!allOk) {
             Log.e(TAG, "runTask: id=$id 分片下载失败 reason=${failedReason.get()}")
+            // CDN 可能不支持 Range（部分直链忽略 Range/返回 416）：回退无 Range 完整下载
+            Log.w(TAG, "runTask: id=$id 回退完整 GET 下载")
+            chunkDir.deleteRecursively()
+            chunkDir.mkdirs()
+            val fullPart = File(chunkDir, "part_0")
+            val fullDownloaded = AtomicLong(0)
+            val fullOk = downloader.downloadFull(
+                taskId = id,
+                url = task.url,
+                partFile = fullPart,
+                headers = headers
+            ) { bytes ->
+                val new = fullDownloaded.addAndGet(bytes)
+                if (!isTaskActive()) return@downloadFull
+                dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
+            }
+            if (fullOk) {
+                finishDownload(id, chunkDir, listOf(fullPart), task.fileName)
+                return
+            }
             throw IllegalStateException(failedReason.get() ?: "分片下载失败")
         }
         Log.d(TAG, "runTask: id=$id 所有分片下载完成，开始合并")
-        // 下载完成但已取消（删除/暂停发生在合并前）：不再合并保存
-        if (!isTaskActive()) return
+        finishDownload(id, chunkDir, (0 until chunkCount).map { File(chunkDir, "part_$it") }, task.fileName)
+    }
 
-        // 合并分片
+    /** 流式降级下载：总大小未知时单分片开放区间下载（Range: bytes=from-），读到 EOF */
+    private suspend fun streamDownload(id: Long, task: DownloadTaskEntity, headers: Map<String, String>) {
+        if (!isTaskActive()) return
+        dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, task.downloadedSize, 0)
+        if (!isTaskActive()) return
+        _stats.update { it + (id to DownloadStats(0L, -1L, 1)) }
+        val chunkDir = chunkDirOf(id).apply { mkdirs() }
+        val partFile = File(chunkDir, "part_0")
+        val downloaded = AtomicLong(partFile.length())
+        val ok = downloader.downloadChunk(
+            taskId = id,
+            url = task.url,
+            start = 0,
+            end = Long.MAX_VALUE,
+            partFile = partFile,
+            headers = headers
+        ) { bytes ->
+            val new = downloaded.addAndGet(bytes)
+            if (!isTaskActive()) return@downloadChunk
+            // 大小未知：只更新已下载量（total=0 表示未知）
+            dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, 0)
+        }
+        if (!ok) {
+            // Range 被 CDN 拒绝（416/403 等）：回退为无 Range 完整 GET
+            Log.w(TAG, "streamDownload: id=$id Range 失败，回退完整 GET 下载")
+            val ok2 = downloader.downloadFull(
+                taskId = id,
+                url = task.url,
+                partFile = partFile,
+                headers = headers
+            ) { bytes ->
+                val new = downloaded.addAndGet(bytes)
+                if (!isTaskActive()) return@downloadFull
+                dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, 0)
+            }
+            if (!ok2) throw IllegalStateException("下载失败（Range 与完整下载均失败）")
+        }
+        if (!isTaskActive()) return
+        finishDownload(id, chunkDir, listOf(partFile), task.fileName)
+    }
+
+    /** 合并分片 → 保存到公共 Download 目录 → 触发完成回调 → 清理临时文件 */
+    private suspend fun finishDownload(
+        id: Long,
+        chunkDir: File,
+        chunkFiles: List<File>,
+        fileName: String
+    ) {
+        if (!isTaskActive()) return
         val merged = File(context.cacheDir, "merged_$id")
-        val chunkFiles = (0 until chunkCount).map { i -> File(chunkDir, "part_$i") }
         if (!downloader.mergeChunks(chunkFiles, merged)) {
-            Log.e(TAG, "runTask: id=$id 合并分片失败")
+            Log.e(TAG, "finishDownload: id=$id 合并分片失败")
             throw IllegalStateException("合并分片失败")
         }
-        // 合并完成但已取消（删除发生在合并期间）：不保存，避免向公共目录写入残留文件
         if (!isTaskActive()) return
-
-        // 保存到公共 Download 目录
-        val savedPath = DownloadSaver.save(context, task.fileName, merged)
+        val savedPath = DownloadSaver.save(context, fileName, merged)
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
-        Log.d(TAG, "runTask: id=$id 下载完成 savedPath=$savedPath")
-
-        // 下载成功：触发清理回调（删除网盘临时转存文件等）；失败/取消不触发
+        Log.d(TAG, "finishDownload: id=$id 下载完成 savedPath=$savedPath")
         taskCallbacks.remove(id)?.let { cb ->
             runCatching { cb() }
         }
-
-        // 清理临时文件与统计
         _stats.update { it - id }
         merged.delete()
         chunkDir.deleteRecursively()

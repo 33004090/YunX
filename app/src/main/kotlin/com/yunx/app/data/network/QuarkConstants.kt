@@ -62,6 +62,18 @@ object QuarkConstants {
     /** 删除文件（取链成功后清理临时转存；body: action_type=2 + filelist） */
     const val DELETE_URL = "$API_BASE/1/clouddrive/file/delete?pr=ucpro&fr=pc&uc_param_str="
 
+    /** 重命名文件（body: fid + file_name） */
+    const val RENAME_URL = "$API_BASE/1/clouddrive/file/rename?pr=ucpro&fr=pc&uc_param_str="
+
+    /** 移动文件（body: action_type=1 + to_pdir_fid + filelist） */
+    const val MOVE_URL = "$API_BASE/1/clouddrive/file/move?pr=ucpro&fr=pc&uc_param_str="
+
+    /** 创建分享（body: fid_list + title + url_type + passcode + expired_type） */
+    const val SHARE_CREATE_URL = "$API_BASE/1/clouddrive/share?pr=ucpro&fr=pc&uc_param_str="
+
+    /** 查询分享信息（body: share_id → share_url / passcode / pwd_id） */
+    const val SHARE_INFO_URL = "$API_BASE/1/clouddrive/share/password?pr=ucpro&fr=pc&uc_param_str="
+
     /** 临时转存目录名 */
     const val TEMP_DIR_NAME = "YunX临时转存"
 

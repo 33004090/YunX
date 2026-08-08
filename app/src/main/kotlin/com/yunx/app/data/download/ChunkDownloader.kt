@@ -36,35 +36,44 @@ class ChunkDownloader(private val client: OkHttpClient) {
     }
 
     /**
-     * 获取文件总大小：用 Range: bytes=0-0 请求解析 Content-Range 的 total。
+     * 获取文件总大小：先试 Range: bytes=0-0（解析 Content-Range），
+     * 失败后再试无 Range 的 GET（读 Content-Length；部分 CDN 忽略 Range 返回 200 全量）。
      * @return 总字节数；无法获取时返回 null
      */
     suspend fun getTotalSize(url: String, headers: Map<String, String>): Long? = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url(url)
-            .header("Range", "bytes=0-0")
-            .apply { headers.forEach { (k, v) -> header(k, v) } }
-            .get()
-            .build()
-        val call = client.newCall(request)
-        // 协程取消（暂停/删除）时立即中断网络请求
-        val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
-        try {
-            runCatching {
-                call.execute().use { response ->
-                    Log.d(TAG, "getTotalSize: code=${response.code} url=${url.take(120)}")
-                    if (!response.isSuccessful) return@use null
-                    // Content-Range: bytes 0-0/123456
-                    response.header("Content-Range")
-                        ?.substringAfter('/')
-                        ?.toLongOrNull()
-                        ?: response.header("Content-Length")?.toLongOrNull()
-                }
-            }.getOrNull()
-        } finally {
-            cancelHandle?.dispose()
-        }
+        val withRange = probeSize(url, headers, withRange = true)
+        if (withRange != null) return@withContext withRange
+        probeSize(url, headers, withRange = false)
     }
+
+    private suspend fun probeSize(url: String, headers: Map<String, String>, withRange: Boolean): Long? =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url(url)
+                .apply {
+                    if (withRange) header("Range", "bytes=0-0")
+                    headers.forEach { (k, v) -> header(k, v) }
+                }
+                .get()
+                .build()
+            val call = client.newCall(request)
+            val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
+            try {
+                runCatching {
+                    call.execute().use { response ->
+                        Log.d(TAG, "getTotalSize: range=$withRange code=${response.code} url=${url.take(120)}")
+                        if (!response.isSuccessful) return@use null
+                        // Content-Range: bytes 0-0/123456
+                        response.header("Content-Range")
+                            ?.substringAfter('/')
+                            ?.toLongOrNull()
+                            ?: response.header("Content-Length")?.toLongOrNull()
+                    }
+                }.getOrNull()
+            } finally {
+                cancelHandle?.dispose()
+            }
+        }
 
     /**
      * 下载一个分片到 partFile（断点续传：从 partFile 已有大小继续）。
@@ -82,14 +91,16 @@ class ChunkDownloader(private val client: OkHttpClient) {
     ): Boolean = withContext(Dispatchers.IO) {
         val existing = partFile.length()
         val from = start + existing
-        val total = end - start + 1
+        // end == Long.MAX_VALUE 表示总大小未知：用开放区间 Range（bytes=from-），读到 EOF
+        val unknownTotal = end == Long.MAX_VALUE
+        val total = if (unknownTotal) -1L else end - start + 1
         // 分片已完整下载
-        if (existing >= total) return@withContext true
-        Log.d(TAG, "downloadChunk: task=$taskId range=$from-$end total=$total 已有=$existing")
+        if (!unknownTotal && existing >= total) return@withContext true
+        Log.d(TAG, "downloadChunk: task=$taskId range=$from-${if (unknownTotal) "EOF" else end} 已有=$existing")
 
         val request = Request.Builder()
             .url(url)
-            .header("Range", "bytes=$from-$end")
+            .header("Range", if (unknownTotal) "bytes=$from-" else "bytes=$from-$end")
             .apply { headers.forEach { (k, v) -> header(k, v) } }
             .get()
             .build()
@@ -128,6 +139,57 @@ class ChunkDownloader(private val client: OkHttpClient) {
             Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end IO异常: ${e.message}")
             // 协程已被取消（暂停/删除）：网络中断属于正常取消，向上传播，
             // 不能让外层误判为"分片下载失败"而覆盖 PAUSED 状态
+            if (!isActive) throw CancellationException("下载被取消", e)
+            false
+        } finally {
+            activeCalls[taskId]?.remove(call)
+            cancelHandle?.dispose()
+        }
+    }
+
+    /** 无 Range 完整下载（回退：部分 CDN 拒绝 Range 请求时使用），读到 EOF */
+    suspend fun downloadFull(
+        taskId: Long,
+        url: String,
+        partFile: File,
+        headers: Map<String, String>,
+        onBytes: suspend (Long) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        val existing = partFile.length()
+        Log.d(TAG, "downloadFull: task=$taskId 完整下载 url=${url.take(120)} 已有=$existing")
+        val request = Request.Builder()
+            .url(url)
+            .apply { headers.forEach { (k, v) -> header(k, v) } }
+            .get()
+            .build()
+        val call = client.newCall(request)
+        activeCalls.getOrPut(taskId) { ConcurrentHashMap.newKeySet() }.add(call)
+        val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "downloadFull: task=$taskId 非预期状态码 ${response.code}")
+                    return@use false
+                }
+                val body = response.body ?: return@use false
+                RandomAccessFile(partFile, "rw").use { raf ->
+                    raf.seek(existing)
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            raf.write(buffer, 0, read)
+                            onBytes(read.toLong())
+                        }
+                    }
+                }
+                true
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            Log.w(TAG, "downloadFull: task=$taskId IO异常: ${e.message}")
             if (!isActive) throw CancellationException("下载被取消", e)
             false
         } finally {

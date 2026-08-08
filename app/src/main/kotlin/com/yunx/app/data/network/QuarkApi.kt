@@ -2,6 +2,7 @@ package com.yunx.app.data.network
 
 import com.yunx.app.data.network.model.DownloadLink
 import com.yunx.app.data.network.model.ShareFile
+import com.yunx.app.data.network.model.ShareInfo
 import com.yunx.app.data.network.model.ShareToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -358,6 +359,85 @@ class QuarkApi(
             .toString()
         val request = postJson(QuarkConstants.DELETE_URL, cookie, body)
         parseData(request) { data -> data.optString("task_id").takeIf { it.isNotBlank() } }
+    }
+
+    // ---------- 云盘文件管理 ----------
+
+    /** 重命名文件（云盘功能抓包：POST file/rename） */
+    suspend fun renameFile(fid: String, newName: String, cookie: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("fid", fid)
+                .put("file_name", newName)
+                .toString()
+            val request = postJson(QuarkConstants.RENAME_URL, cookie, body)
+            runCatching {
+                client.newCall(request).execute().use { response ->
+                    val json = JSONObject(response.body?.string() ?: "{}")
+                    json.optInt("status") == 200
+                }
+            }.getOrDefault(false)
+        }
+
+    /** 移动文件（云盘功能抓包：action_type=1 + to_pdir_fid + filelist）；返回 task_id */
+    suspend fun moveFile(fid: String, toPdirFid: String, cookie: String): String? =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("action_type", 1)
+                .put("to_pdir_fid", toPdirFid)
+                .put("filelist", JSONArray().put(fid))
+                .put("exclude_fids", JSONArray())
+                .toString()
+            val request = postJson(QuarkConstants.MOVE_URL, cookie, body)
+            parseData(request) { data -> data.optString("task_id").takeIf { it.isNotBlank() } }
+        }
+
+    /**
+     * 创建分享（云盘功能抓包：POST /1/clouddrive/share）。
+     * @param urlType 1=链接无提取码 2=链接+提取码
+     * @param expiredType 1=永久 2=一天 3=七天 4=三十天
+     * @return 分享 share_id
+     */
+    suspend fun createShare(
+        fidList: List<String>,
+        title: String,
+        urlType: Int,
+        passcode: String,
+        expiredType: Int,
+        cookie: String
+    ): String? = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("fid_list", JSONArray().apply { fidList.forEach { put(it) } })
+            .put("title", title.ifBlank { "分享文件" })
+            .put("url_type", urlType)
+            .apply { if (passcode.isNotBlank()) put("passcode", passcode) }
+            .put("expired_type", expiredType)
+            .put("support_error_code", JSONArray().put("41060"))
+            .toString()
+        val request = postJson(QuarkConstants.SHARE_CREATE_URL, cookie, body)
+        parseData(request) { data ->
+            // 响应结构：data.task_resp.data.share_id（抓包实证，取错层级会解析不到 → 报"创建分享失败"）
+            data.optJSONObject("task_resp")
+                ?.optJSONObject("data")
+                ?.optString("share_id")
+                ?.takeIf { it.isNotBlank() }
+                ?: data.optString("share_id").takeIf { it.isNotBlank() }
+        }
+    }
+
+    /** 查询分享信息（云盘功能抓包：POST share/password body={share_id} → 链接/提取码/标题） */
+    suspend fun getShareInfo(shareId: String, cookie: String): ShareInfo? = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("share_id", shareId).toString()
+        val request = postJson(QuarkConstants.SHARE_INFO_URL, cookie, body)
+        parseData(request) { data ->
+            ShareInfo(
+                shareUrl = data.optString("share_url"),
+                passcode = data.optString("passcode"),
+                pwdId = data.optString("pwd_id"),
+                title = data.optString("title"),
+                expiredType = data.optInt("expired_type")
+            )
+        }
     }
 
     // ---------- 请求构造与响应解析 ----------

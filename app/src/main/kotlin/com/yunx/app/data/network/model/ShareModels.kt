@@ -32,6 +32,17 @@ data class ShareFile(
 )
 
 /**
+ * 分享信息（云盘功能：创建分享后查询得到的链接与提取码）。
+ */
+data class ShareInfo(
+    val shareUrl: String,
+    val passcode: String,
+    val pwdId: String,
+    val title: String,
+    val expiredType: Int
+)
+
+/**
  * 下载直链。
  * @param cleanupDirFid 下载完成后需删除的临时转存子目录 fid（根治夸克去重返回已删 fid）；null 表示无需清理
  */

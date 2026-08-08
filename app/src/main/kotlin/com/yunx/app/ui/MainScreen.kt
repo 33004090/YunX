@@ -177,7 +177,8 @@ fun MainScreen() {
     val quarkCloudViewModel: QuarkCloudViewModel = viewModel(
         factory = QuarkCloudViewModel.Factory(
             api,
-            { repository.getAccount()?.cookie }
+            { repository.getAccount()?.cookie },
+            downloadManager
         )
     )
     val xunleiResolveRepository = remember {

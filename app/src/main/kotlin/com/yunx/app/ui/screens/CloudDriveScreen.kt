@@ -24,7 +24,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -55,6 +57,14 @@ fun CloudDriveScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
+
+    // 操作结果 Toast（放在本层：弹窗关闭后仍能正常弹出）
+    LaunchedEffect(viewModel.cloudMessage) {
+        viewModel.cloudMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.consumeMessage()
+        }
+    }
 
     // 不透明背景包裹：避免 Tab 内切换时透出下层内容（账号列表）导致视觉重叠
     Surface(
@@ -88,13 +98,18 @@ fun CloudDriveScreen(
                 }
             }
 
-            is QuarkCloudUiState.Loaded -> LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+            is QuarkCloudUiState.Loaded -> PullToRefreshBox(
+                isRefreshing = viewModel.refreshing,
+                onRefresh = { viewModel.refresh() },
+                modifier = Modifier.fillMaxSize()
             ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
             item {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -153,12 +168,28 @@ fun CloudDriveScreen(
                         if (file.isdir) {
                             viewModel.openFolder(file)
                         } else {
-                            Toast.makeText(context, "「${file.fname}」下载功能开发中", Toast.LENGTH_SHORT).show()
+                            viewModel.openActions(file)
                         }
+                    },
+                    // 只有文件夹显示「更多」三个点（文件点击即打开操作菜单，无需按钮）
+                    onMore = if (file.isdir) {
+                        { viewModel.openActions(file) }
+                    } else {
+                        null
                     }
                 )
             }
             }
+            }
         }
+    }
+
+    // 文件操作弹窗（更多按钮/点击文件 → 下载/分享/移动/重命名/删除）
+    viewModel.actionFile?.let { file ->
+        FileActionSheet(
+            file = file,
+            viewModel = viewModel,
+            onDismiss = { viewModel.dismissActions() }
+        )
     }
 }
