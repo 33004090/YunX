@@ -576,8 +576,12 @@ internal fun ShareResultDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    // 拼接分享文案（按平台区分：UC/夸克）
-    val platformName = if (info.shareUrl.contains("uc.cn")) "UC网盘" else "夸克网盘"
+    // 拼接分享文案（按平台区分：UC / 迅雷 / 夸克）
+    val platformName = when {
+        info.shareUrl.contains("uc.cn") -> "UC网盘"
+        info.shareUrl.contains("xunlei.com") -> "迅雷网盘"
+        else -> "夸克网盘"
+    }
     val shareText = buildString {
         append("我用${platformName}分享了「${info.title}」\n")
         append("链接：${info.shareUrl}")

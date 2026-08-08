@@ -2,6 +2,7 @@ package com.yunx.app.data.network
 
 import com.yunx.app.data.network.model.DownloadLink
 import com.yunx.app.data.network.model.ShareFile
+import com.yunx.app.data.network.model.ShareInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -524,6 +525,107 @@ class XunleiApi(
             ?: createFolder(XunleiConstants.TEMP_DIR_NAME, "", accessToken, deviceId, captchaToken)
     }
 
+    // ---------- 云盘文件管理（迅雷网盘功能） ----------
+
+    /** 重命名（PATCH /drive/v1/files/{id}，body {"name"}） */
+    suspend fun renameFile(
+        fileId: String,
+        name: String,
+        accessToken: String,
+        deviceId: String,
+        captchaToken: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        panCall(captchaToken, deviceId, "PATCH:/drive/v1/files/$fileId", { t ->
+            panRequestM(
+                "${XunleiConstants.FILES_URL}/$fileId",
+                accessToken, deviceId, t, "PATCH",
+                JSONObject().put("name", name).toString()
+            )
+        }) { data -> data.optString("id").isNotBlank() }
+    }
+
+    /** 移动（batchMove：ids + to.parent_id）；返回 task_id */
+    suspend fun moveFile(
+        fileIds: List<String>,
+        toParentId: String,
+        accessToken: String,
+        deviceId: String,
+        captchaToken: String
+    ): String? = withContext(Dispatchers.IO) {
+        panCall(captchaToken, deviceId, "POST:/drive/v1/files:batchMove", { t ->
+            panRequestM(
+                XunleiConstants.MOVE_URL,
+                accessToken, deviceId, t, "POST",
+                JSONObject()
+                    .put("ids", JSONArray().apply { fileIds.forEach { put(it) } })
+                    .put("to", JSONObject().put("parent_id", toParentId).put("space", ""))
+                    .put("space", "")
+                    .toString()
+            )
+        }) { data -> data.optString("task_id").takeIf { it.isNotBlank() } }
+    }
+
+    /** 创建分享（POST /drive/v1/share，迅雷分享带提取码；官方默认自动生成，可自定义 4 位）
+     *  @param expirationDays "-1"=永久 "1"/"7"/"30"=天数
+     *  @param passCode 自定义提取码（4 位字母数字，留空则服务端自动生成）
+     *  @return 分享信息（share_url/pass_code 直接返回，无需二次查询）
+     */
+    suspend fun createShare(
+        fileIds: List<String>,
+        title: String,
+        expirationDays: String,
+        accessToken: String,
+        deviceId: String,
+        captchaToken: String,
+        passCode: String = ""
+    ): ShareInfo? = withContext(Dispatchers.IO) {
+        panCall(captchaToken, deviceId, "POST:/drive/v1/share", { t ->
+            panRequestM(
+                XunleiConstants.SHARE_CREATE_URL,
+                accessToken, deviceId, t, "POST",
+                JSONObject()
+                    .put("file_ids", JSONArray().apply { fileIds.forEach { put(it) } })
+                    .put("share_to", "copy")
+                    .put("params", JSONObject()
+                        .put("subscribe_push", "false")
+                        .put("WithPassCodeInLink", "true")
+                        .put("with_pass_code_in_link", "true")
+                        .apply { if (passCode.isNotBlank()) put("pass_code", passCode) })
+                    .put("title", title.ifBlank { "分享文件" })
+                    .put("restore_limit", "-1")
+                    .put("expiration_days", expirationDays)
+                    .toString()
+            )
+        }) { data ->
+            ShareInfo(
+                shareUrl = data.optString("share_url"),
+                passcode = data.optString("pass_code"),
+                pwdId = data.optString("share_id"),
+                title = data.optString("title").ifBlank { title },
+                expiredType = 1
+            )
+        }
+    }
+
+    /** 删除（batchTrash：ids + space，回收站） */
+    suspend fun deleteFiles(
+        fileIds: List<String>,
+        accessToken: String,
+        deviceId: String,
+        captchaToken: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        panCall(captchaToken, deviceId, "POST:/drive/v1/files:batchTrash", { t ->
+            panRequestM(
+                XunleiConstants.TRASH_URL,
+                accessToken, deviceId, t, "POST",
+                JSONObject()
+                    .put("ids", JSONArray().apply { fileIds.forEach { put(it) } })
+                    .put("space", "")
+                    .toString()
+            )
+        }) { true }
+    }
+
     // ---------- 请求构造 ----------
 
     private fun parseFileArray(array: JSONArray): List<ShareFile> = buildList {
@@ -560,9 +662,36 @@ class XunleiApi(
             .header("Content-Type", "application/json")
             .header("Origin", "https://pan.xunlei.com")
             .header("Referer", "https://pan.xunlei.com/")
-        if (captchaToken.isNotBlank()) builder.header("X-Captcha-Token", captchaToken)
+            if (captchaToken.isNotBlank()) builder.header("X-Captcha-Token", captchaToken)
         return if (body != null) builder.post(body.toRequestBody(jsonMediaType)).build()
         else builder.get().build()
+    }
+
+    /** pan 请求（支持 PATCH 等动词，云盘重命名用） */
+    private fun panRequestM(
+        url: String,
+        accessToken: String,
+        deviceId: String,
+        captchaToken: String,
+        method: String,
+        body: String? = null
+    ): Request {
+        val builder = Request.Builder()
+            .url(url)
+            .header("User-Agent", XunleiConstants.WEB_UA)
+            .header("Authorization", "Bearer $accessToken")
+            .header("X-Device-Id", deviceId)
+            .header("X-Client-Version", "8.31.0.9726")
+            .header("Content-Type", "application/json")
+            .header("Origin", "https://pan.xunlei.com")
+            .header("Referer", "https://pan.xunlei.com/")
+            if (captchaToken.isNotBlank()) builder.header("X-Captcha-Token", captchaToken)
+        val rb = body?.toRequestBody(jsonMediaType) ?: "{}".toRequestBody(jsonMediaType)
+        return when (method) {
+            "PATCH" -> builder.patch(rb).build()
+            "GET" -> builder.get().build()
+            else -> builder.post(rb).build()
+        }
     }
 
     /** pan 请求带验证码自动刷新重试：失败 captcha_invalid → 用旧 token 换新 token → 重试一次（对齐官方） */

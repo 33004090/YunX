@@ -67,6 +67,7 @@ import com.yunx.app.ui.resolve.ShareDetailScreen
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveUiState
 import com.yunx.app.ui.viewmodel.ResolveViewModel
+import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
 
 /**
  * 解析页：输入分享链接与提取码 → 解析 → 展示分享详情 → 获取下载直链。
@@ -78,6 +79,8 @@ fun ResolveScreen(
     viewModel: ResolveViewModel,
     /** 夸克云盘浏览 ViewModel（分享文件转存目录选择用） */
     quarkCloudViewModel: QuarkCloudViewModel,
+    /** 迅雷网盘云盘浏览 ViewModel（迅雷分享转存目录选择用） */
+    xunleiCloudViewModel: XunleiCloudViewModel,
     modifier: Modifier = Modifier
 ) {
     val state = viewModel.uiState
@@ -172,11 +175,12 @@ fun ResolveScreen(
         ) { s ->
             when (s) {
                 is ResolveUiState.Detail -> ShareDetailScreen(
-                    session = s.session,
-                    files = s.files,
-                    viewModel = viewModel,
-                    quarkCloudViewModel = quarkCloudViewModel,
-                    scrollBehavior = scrollBehavior,
+            session = s.session,
+            files = s.files,
+            viewModel = viewModel,
+            quarkCloudViewModel = quarkCloudViewModel,
+            xunleiCloudViewModel = xunleiCloudViewModel,
+            scrollBehavior = scrollBehavior,
                     // 顶部左上角返回：退出文件页回到输入页（输入框内容保留）
                     onExit = { viewModel.backToInput() },
                     // 列表「返回上一级」：子目录回上级，根目录回输入页

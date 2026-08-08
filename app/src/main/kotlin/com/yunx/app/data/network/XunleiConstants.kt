@@ -98,4 +98,13 @@ object XunleiConstants {
 
     /** 转存目标目录名 */
     const val TEMP_DIR_NAME = "YunX临时转存"
+
+    /** 移动文件（batchMove：ids + to.parent_id） */
+    const val MOVE_URL = "$PAN_BASE/drive/v1/files:batchMove"
+
+    /** 删除文件（batchTrash：ids + space） */
+    const val TRASH_URL = "$PAN_BASE/drive/v1/files:batchTrash"
+
+    /** 创建分享（POST /drive/v1/share，file_ids + title + expiration_days） */
+    const val SHARE_CREATE_URL = "$PAN_BASE/drive/v1/share"
 }

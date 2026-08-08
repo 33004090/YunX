@@ -52,6 +52,7 @@ import com.yunx.app.data.db.UCAccountEntity
 import com.yunx.app.data.db.XunleiAccountEntity
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.UCCoudViewModel
+import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
 
 /**
  * 网盘账号展示模型。
@@ -83,6 +84,8 @@ fun DriveScreen(
     quarkCloudViewModel: QuarkCloudViewModel,
     /** UC 网盘云盘浏览 ViewModel */
     ucCloudViewModel: UCCoudViewModel,
+    /** 迅雷网盘云盘浏览 ViewModel */
+    xunleiCloudViewModel: XunleiCloudViewModel,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
     /** 夸克云盘下载入队后切换到「下载」Tab */
@@ -106,6 +109,8 @@ fun DriveScreen(
     var showCloud by rememberSaveable { mutableStateOf(false) }
     // UC 网盘云盘浏览：网盘 Tab 内切换（非全屏）
     var showUCCloud by rememberSaveable { mutableStateOf(false) }
+    // 迅雷网盘云盘浏览：网盘 Tab 内切换（非全屏）
+    var showXunleiCloud by rememberSaveable { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
@@ -147,11 +152,12 @@ fun DriveScreen(
         emptyList<DriveAccount>()
     }
 
-    // 账号列表 ↔ 夸克云盘 ↔ UC 云盘：平滑过渡（淡入 + 轻微缩放，不僵硬）
+    // 账号列表 ↔ 夸克云盘 ↔ UC 云盘 ↔ 迅雷云盘：平滑过渡（淡入 + 轻微缩放，不僵硬）
     AnimatedContent(
         targetState = when {
             showCloud -> 1
             showUCCloud -> 2
+            showXunleiCloud -> 3
             else -> 0
         },
         transitionSpec = {
@@ -168,11 +174,17 @@ fun DriveScreen(
                 onDownloadStarted = onDownloadStarted
             )
             2 -> UCCoudScreen(
-                viewModel = ucCloudViewModel,
-                scrollBehavior = scrollBehavior,
-                onExit = { showUCCloud = false },
-                onDownloadStarted = onDownloadStarted
-            )
+            viewModel = ucCloudViewModel,
+            scrollBehavior = scrollBehavior,
+            onExit = { showUCCloud = false },
+            onDownloadStarted = onDownloadStarted
+        )
+        3 -> XunleiCloudScreen(
+            viewModel = xunleiCloudViewModel,
+            scrollBehavior = scrollBehavior,
+            onExit = { showXunleiCloud = false },
+            onDownloadStarted = onDownloadStarted
+        )
             else -> LazyColumn(
                 modifier = modifier
                     .fillMaxSize()
@@ -222,7 +234,7 @@ fun DriveScreen(
             DriveAccountCard(
                 account = xunlei,
                 onClick = if (xunlei.isLoggedIn) {
-                    { showXunleiSheet = true }
+                    { showXunleiCloud = true }
                 } else {
                     onXunleiLogin
                 },

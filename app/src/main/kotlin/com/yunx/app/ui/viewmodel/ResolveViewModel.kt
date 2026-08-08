@@ -83,9 +83,13 @@ class ResolveViewModel(
     var saveMessage by mutableStateOf<String?>(null)
         private set
 
-    /** 当前分享是否支持转存（仅夸克实现） */
+    /** 当前分享是否支持转存（夸克 / 迅雷） */
     val canSave: Boolean
-        get() = currentPlatform == SharePlatform.QUARK
+        get() = currentPlatform == SharePlatform.QUARK || currentPlatform == SharePlatform.XUNLEI
+
+    /** 当前分享是否为迅雷（UI 选择迅雷版转存目录选择器） */
+    val isSaveXunlei: Boolean
+        get() = currentPlatform == SharePlatform.XUNLEI
 
     /** 请求转存：记录目标文件并打开目录选择弹窗 */
     fun requestSave(file: ShareFile) {
@@ -102,26 +106,42 @@ class ResolveViewModel(
         saveMessage = null
     }
 
-    /** 转存到网盘指定目录（保存成功自动关闭弹窗） */
+    /** 转存到网盘指定目录（保存成功自动关闭弹窗；夸克 / 迅雷分平台实现） */
     fun saveToCloud(toDirFid: String) {
         val file = saveTarget ?: return
         val s = session ?: return
         viewModelScope.launch {
             isSaving = true
             try {
-                val credential = currentCredential()
-                if (credential.isNullOrBlank()) {
-                    saveMessage = "请先登录夸克网盘"
-                    return@launch
+                if (currentPlatform == SharePlatform.XUNLEI) {
+                    val credential = currentCredential()
+                    if (credential.isNullOrBlank()) {
+                        saveMessage = "请先登录迅雷网盘"
+                        return@launch
+                    }
+                    xunleiResolveRepository.transferFile(s, file, toDirFid, credential)
+                        .onSuccess {
+                            saveMessage = "已保存到迅雷网盘"
+                            saveTarget = null
+                        }
+                        .onFailure {
+                            saveMessage = it.message ?: "转存失败"
+                        }
+                } else {
+                    val credential = currentCredential()
+                    if (credential.isNullOrBlank()) {
+                        saveMessage = "请先登录夸克网盘"
+                        return@launch
+                    }
+                    resolveRepository.saveToCloud(s, file, toDirFid, credential)
+                        .onSuccess {
+                            saveMessage = "已保存到夸克网盘"
+                            saveTarget = null
+                        }
+                        .onFailure {
+                            saveMessage = it.message ?: "转存失败"
+                        }
                 }
-                resolveRepository.saveToCloud(s, file, toDirFid, credential)
-                    .onSuccess {
-                        saveMessage = "已保存到夸克网盘"
-                        saveTarget = null
-                    }
-                    .onFailure {
-                        saveMessage = it.message ?: "转存失败"
-                    }
             } finally {
                 isSaving = false
             }
@@ -168,7 +188,7 @@ class ResolveViewModel(
         _selected.clear()
     }
 
-    /** 批量转存到夸克网盘根目录（仅夸克分享支持） */
+    /** 批量转存到网盘根目录（夸克 / 迅雷分平台；仅夸克 / 迅雷分享支持） */
     fun batchSaveToCloud() {
         val files = _selected.toList()
         val s = session ?: return
@@ -177,16 +197,25 @@ class ResolveViewModel(
             try {
                 val credential = currentCredential()
                 if (credential.isNullOrBlank()) {
-                    downloadError = "请先登录夸克网盘"
+                    downloadError = "请先登录${if (currentPlatform == SharePlatform.XUNLEI) "迅雷" else "夸克"}网盘"
                     return@launch
                 }
                 var okCount = 0
                 files.forEach { file ->
                     runCatching {
-                        resolveRepository.saveToCloud(s, file, QuarkConstants.DEFAULT_PDIR_FID, credential)
+                        if (currentPlatform == SharePlatform.XUNLEI) {
+                            // 迅雷批量转存到根目录（parent_id 为空）
+                            xunleiResolveRepository.transferFile(s, file, "", credential)
+                        } else {
+                            resolveRepository.saveToCloud(s, file, QuarkConstants.DEFAULT_PDIR_FID, credential)
+                        }
                     }.onSuccess { okCount++ }
                 }
-                downloadError = if (okCount > 0) "已转存 $okCount 项到夸克网盘" else "转存失败"
+                downloadError = if (okCount > 0) {
+                    "已转存 $okCount 项到${if (currentPlatform == SharePlatform.XUNLEI) "迅雷" else "夸克"}网盘"
+                } else {
+                    "转存失败"
+                }
                 exitMultiSelect()
             } finally {
                 isBatchWorking = false

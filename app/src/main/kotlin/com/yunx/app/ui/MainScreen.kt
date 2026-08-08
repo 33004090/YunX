@@ -83,6 +83,7 @@ import com.yunx.app.ui.viewmodel.ResolveViewModel
 import com.yunx.app.ui.viewmodel.UCCoudViewModel
 import com.yunx.app.ui.viewmodel.UCAccountViewModel
 import com.yunx.app.ui.viewmodel.XunleiAccountViewModel
+import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -197,6 +198,16 @@ fun MainScreen() {
         factory = UCCoudViewModel.Factory(
             ucApi,
             { ucRepository.getAccount()?.cookie },
+            downloadManager
+        )
+    )
+    // 迅雷网盘云盘浏览：点击已登录的迅雷卡片打开（access_token/设备指纹/captcha 从数据库读取）
+    val xunleiCloudViewModel: XunleiCloudViewModel = viewModel(
+        factory = XunleiCloudViewModel.Factory(
+            xunleiApi,
+            { xunleiRepository.getAccount()?.accessToken },
+            { xunleiRepository.getAccount()?.deviceId },
+            { xunleiRepository.getAccount()?.captchaToken },
             downloadManager
         )
     )
@@ -387,7 +398,8 @@ fun MainScreen() {
                         MainTab.Resolve -> ResolveScreen(
                             scrollBehavior,
                             resolveViewModel,
-                            quarkCloudViewModel
+                            quarkCloudViewModel,
+                            xunleiCloudViewModel
                         )
                         MainTab.Drive -> DriveScreen(
                             scrollBehavior = scrollBehavior,
@@ -398,6 +410,7 @@ fun MainScreen() {
                             c139Account = c139Account,
                             quarkCloudViewModel = quarkCloudViewModel,
                             ucCloudViewModel = ucCloudViewModel,
+                            xunleiCloudViewModel = xunleiCloudViewModel,
                             onQuarkLogin = { showQuarkLogin = true },
                             onQuarkLogout = { viewModel.logout() },
                             onDownloadStarted = { currentTab = MainTab.Download },
