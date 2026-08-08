@@ -1,5 +1,12 @@
 package com.yunx.app.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -140,13 +147,39 @@ fun DriveScreen(
         emptyList<DriveAccount>()
     }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .nestedScroll(scrollBehavior.nestedScrollConnection),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    // 账号列表 ↔ 夸克云盘 ↔ UC 云盘：平滑过渡（淡入 + 轻微缩放，不僵硬）
+    AnimatedContent(
+        targetState = when {
+            showCloud -> 1
+            showUCCloud -> 2
+            else -> 0
+        },
+        transitionSpec = {
+            (fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.98f))
+                .togetherWith(fadeOut(tween(150)) + scaleOut(tween(150), targetScale = 0.98f))
+        },
+        label = "driveContent"
+    ) { target ->
+        when (target) {
+            1 -> CloudDriveScreen(
+                viewModel = quarkCloudViewModel,
+                scrollBehavior = scrollBehavior,
+                onExit = { showCloud = false },
+                onDownloadStarted = onDownloadStarted
+            )
+            2 -> UCCoudScreen(
+                viewModel = ucCloudViewModel,
+                scrollBehavior = scrollBehavior,
+                onExit = { showUCCloud = false },
+                onDownloadStarted = onDownloadStarted
+            )
+            else -> LazyColumn(
+                modifier = modifier
+                    .fillMaxSize()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
         item {
             Text(
                 text = "登录后即可自动携带凭证解析与下载",
@@ -233,28 +266,8 @@ fun DriveScreen(
         items(others, key = { it.id }) { account ->
             DriveAccountCard(account = account)
         }
-    }
-
-    // 夸克云盘浏览：网盘 Tab 内切换展示（保留顶部标题栏 + 底部导航）
-    if (showCloud) {
-        CloudDriveScreen(
-            viewModel = quarkCloudViewModel,
-            scrollBehavior = scrollBehavior,
-            onExit = { showCloud = false },
-            onDownloadStarted = onDownloadStarted
-        )
-        return
-    }
-
-    // UC 网盘云盘浏览：网盘 Tab 内切换展示
-    if (showUCCloud) {
-        UCCoudScreen(
-            viewModel = ucCloudViewModel,
-            scrollBehavior = scrollBehavior,
-            onExit = { showUCCloud = false },
-            onDownloadStarted = onDownloadStarted
-        )
-        return
+            }
+        }
     }
 
     // 已登录夸克：点击卡片弹出账号信息底部弹窗

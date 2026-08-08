@@ -1,6 +1,14 @@
 package com.yunx.app.ui.screens
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -110,7 +118,15 @@ fun UCCoudScreen(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface
     ) {
-        when (val s = state) {
+        // 目录切换（进入文件夹/返回）：列表淡入淡出过渡
+        AnimatedContent(
+            targetState = state,
+            transitionSpec = {
+                fadeIn(tween(200)) togetherWith fadeOut(tween(140))
+            },
+            label = "ucCloudState"
+        ) { s ->
+            when (s) {
             is UCCloudUiState.Loading -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -221,6 +237,7 @@ fun UCCoudScreen(
                         items(s.files, key = { it.fid }) { file ->
                             ShareFileRow(
                                 file = file,
+                                modifier = Modifier.animateItem(),
                                 onClick = {
                                     if (viewModel.multiSelectMode) {
                                         viewModel.toggleSelect(file)
@@ -251,7 +268,13 @@ fun UCCoudScreen(
                     }
                 }
 
-                if (viewModel.multiSelectMode) {
+                // 多选模式：底部批量操作栏（底部滑入淡入，退出反向）
+                AnimatedVisibility(
+                    visible = viewModel.multiSelectMode,
+                    enter = slideInVertically(tween(220)) { it } + fadeIn(tween(220)),
+                    exit = slideOutVertically(tween(180)) { it } + fadeOut(tween(180)),
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                ) {
                     MultiSelectBar(
                         count = viewModel.selected.size,
                         actions = listOf(
@@ -271,8 +294,9 @@ fun UCCoudScreen(
                         )
                     )
                 }
-            }
         }
+    }
+    }
     }
 
     // 文件操作菜单（下载/重命名/移动/分享）
@@ -539,8 +563,14 @@ private fun UCMoveSheet(
                 onNavigate = { viewModel.moveNavigateToLevel(it) }
             )
             Spacer(modifier = Modifier.height(8.dp))
-            when (val s = moveState) {
-                is UCCloudUiState.Loading -> Box(
+            // 移动目录切换：淡入过渡
+            AnimatedContent(
+                targetState = moveState,
+                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
+                label = "ucMoveState"
+            ) { s ->
+                when (s) {
+                    is UCCloudUiState.Loading -> Box(
                     modifier = Modifier.fillMaxWidth().height(180.dp),
                     contentAlignment = Alignment.Center
                 ) { CircularProgressIndicator() }
@@ -579,6 +609,7 @@ private fun UCMoveSheet(
                         }
                     }
                 }
+            }
             }
             Spacer(modifier = Modifier.height(16.dp))
             val dirName = (moveState as? UCCloudUiState.Loaded)?.pathNames?.lastOrNull() ?: "根目录"

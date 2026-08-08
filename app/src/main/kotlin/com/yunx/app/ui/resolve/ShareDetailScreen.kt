@@ -167,6 +167,7 @@ fun ShareDetailScreen(
             items(files, key = { it.fid }) { file ->
                 ShareFileRow(
                     file = file,
+                    modifier = Modifier.animateItem(),
                     onClick = {
                         if (viewModel.multiSelectMode) {
                             viewModel.toggleSelect(file)
@@ -360,10 +361,12 @@ internal fun ShareFileRow(
     /** 多选模式：是否选中 */
     selected: Boolean = false,
     /** 是否显示行首复选框（仅多选模式列表传 true；移动/转存等选择器不显示） */
-    showCheckbox: Boolean = false
+    showCheckbox: Boolean = false,
+    /** 列表项动画等（调用方传入 Modifier.animateItem()） */
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,

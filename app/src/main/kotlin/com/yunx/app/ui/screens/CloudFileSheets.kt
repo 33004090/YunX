@@ -4,6 +4,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -313,23 +318,28 @@ private fun MoveStep(
             onNavigate = { viewModel.moveNavigateToLevel(it) }
         )
         Spacer(modifier = Modifier.height(8.dp))
+        // 移动目录切换：淡入过渡
+        AnimatedContent(
+            targetState = moveState,
+            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
+            label = "moveState"
+        ) { s ->
+            when (s) {
+                is QuarkCloudUiState.Loading -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
 
-        when (val s = moveState) {
-            is QuarkCloudUiState.Loading -> Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                contentAlignment = Alignment.Center
-            ) { CircularProgressIndicator() }
+                is QuarkCloudUiState.Error -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    contentAlignment = Alignment.Center
+                ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
-            is QuarkCloudUiState.Error -> Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(160.dp),
-                contentAlignment = Alignment.Center
-            ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-
-            is QuarkCloudUiState.Loaded -> {
+                is QuarkCloudUiState.Loaded -> {
                 // 子目录：返回上一级
                 if (s.pathNames.isNotEmpty()) {
                     BackToParentItem(onClick = { viewModel.moveBack() })
@@ -362,6 +372,7 @@ private fun MoveStep(
                         }
                     }
                 }
+            }
             }
         }
 
@@ -933,23 +944,28 @@ private fun BatchMoveStep(
             onNavigate = { viewModel.moveNavigateToLevel(it) }
         )
         Spacer(modifier = Modifier.height(8.dp))
+        // 移动目录切换：淡入过渡
+        AnimatedContent(
+            targetState = moveState,
+            transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
+            label = "batchMoveState"
+        ) { s ->
+            when (s) {
+                is QuarkCloudUiState.Loading -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
 
-        when (val s = moveState) {
-            is QuarkCloudUiState.Loading -> Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                contentAlignment = Alignment.Center
-            ) { CircularProgressIndicator() }
+                is QuarkCloudUiState.Error -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    contentAlignment = Alignment.Center
+                ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
-            is QuarkCloudUiState.Error -> Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(160.dp),
-                contentAlignment = Alignment.Center
-            ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-
-            is QuarkCloudUiState.Loaded -> {
+                is QuarkCloudUiState.Loaded -> {
                 if (s.pathNames.isNotEmpty()) {
                     BackToParentItem(onClick = { viewModel.moveBack() })
                     Spacer(modifier = Modifier.height(4.dp))
@@ -981,6 +997,7 @@ private fun BatchMoveStep(
                         }
                     }
                 }
+            }
             }
         }
 

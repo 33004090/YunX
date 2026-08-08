@@ -1,5 +1,15 @@
 package com.yunx.app.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -309,27 +319,12 @@ fun MainScreen() {
         return
     }
 
-    // 关于云析：全屏覆盖
-    if (showAbout) {
-        AboutScreen(
-            onBack = { showAbout = false },
-            onPreviewOnboarding = {
-                // 重置引导标记并重新展示欢迎界面
-                context.getSharedPreferences("yunx_prefs", android.content.Context.MODE_PRIVATE)
-                    .edit()
-                    .putBoolean("onboarding_shown", false)
-                    .apply()
-                showAbout = false
-                showOnboarding = true
-            }
-        )
-        return
-    }
-
     // 折叠标题状态提升到本层：跨页面共享，页面切换时折叠/展开状态保持不变
     val topAppBarState = rememberTopAppBarState()
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(topAppBarState)
 
+    // 主框架与全屏覆盖层（关于页）放在同一 Box：覆盖层带过渡动画
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -371,46 +366,83 @@ fun MainScreen() {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // 每个页面独立保存状态，切换 Tab 再切回来不丢失
-            saveableStateHolder.SaveableStateProvider(currentTab) {
-                when (currentTab) {
-                    MainTab.Resolve -> ResolveScreen(
-                        scrollBehavior,
-                        resolveViewModel,
-                        quarkCloudViewModel
-                    )
-                    MainTab.Drive -> DriveScreen(
-                        scrollBehavior = scrollBehavior,
-                        quarkAccount = quarkAccount,
-                        ucAccount = ucAccount,
-                        xunleiAccount = xunleiAccount,
-                        baiduAccount = baiduAccount,
-                        c139Account = c139Account,
-                        quarkCloudViewModel = quarkCloudViewModel,
-                        ucCloudViewModel = ucCloudViewModel,
-                        onQuarkLogin = { showQuarkLogin = true },
-                        onQuarkLogout = { viewModel.logout() },
-                        onDownloadStarted = { currentTab = MainTab.Download },
-                        onUCLogin = { showUCLogin = true },
-                        onUCLogout = { ucViewModel.logout() },
-                        onXunleiLogin = { showXunleiLogin = true },
-                        onXunleiLogout = { xunleiViewModel.logout() },
-                        onBaiduLogin = { showBaiduLogin = true },
-                        onBaiduLogout = { baiduViewModel.logout() },
-                        onC139Login = { showC139Login = true },
-                        onC139Logout = { c139ViewModel.logout() }
-                    )
-                    MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
-                    MainTab.Settings -> SettingsScreen(
-                        scrollBehavior = scrollBehavior,
-                        downloadThreads = settings.downloadThreads,
-                        onThreadsChange = { settings.downloadThreads = it },
-                        onAboutClick = { showAbout = true },
-                        backupManager = backupManager
-                    )
+            // 每个页面独立保存状态，切换 Tab 再切回来不丢失；带 Material3 过渡动画（按 Tab 顺序决定方向）
+            AnimatedContent(
+                targetState = currentTab,
+                transitionSpec = {
+                    // 根据 Tab 顺序决定滑动方向：向右切（新Tab在右边）→ 新页从右滑入；向左切反向
+                    val forward = targetState.ordinal > initialState.ordinal
+                    if (forward) {
+                        (fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 4 })
+                            .togetherWith(fadeOut(tween(160)) + slideOutHorizontally(tween(160)) { -it / 4 })
+                    } else {
+                        (fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 4 })
+                            .togetherWith(fadeOut(tween(160)) + slideOutHorizontally(tween(160)) { it / 4 })
+                    }
+                },
+                label = "mainTab"
+            ) { tab ->
+                saveableStateHolder.SaveableStateProvider(tab) {
+                    when (tab) {
+                        MainTab.Resolve -> ResolveScreen(
+                            scrollBehavior,
+                            resolveViewModel,
+                            quarkCloudViewModel
+                        )
+                        MainTab.Drive -> DriveScreen(
+                            scrollBehavior = scrollBehavior,
+                            quarkAccount = quarkAccount,
+                            ucAccount = ucAccount,
+                            xunleiAccount = xunleiAccount,
+                            baiduAccount = baiduAccount,
+                            c139Account = c139Account,
+                            quarkCloudViewModel = quarkCloudViewModel,
+                            ucCloudViewModel = ucCloudViewModel,
+                            onQuarkLogin = { showQuarkLogin = true },
+                            onQuarkLogout = { viewModel.logout() },
+                            onDownloadStarted = { currentTab = MainTab.Download },
+                            onUCLogin = { showUCLogin = true },
+                            onUCLogout = { ucViewModel.logout() },
+                            onXunleiLogin = { showXunleiLogin = true },
+                            onXunleiLogout = { xunleiViewModel.logout() },
+                            onBaiduLogin = { showBaiduLogin = true },
+                            onBaiduLogout = { baiduViewModel.logout() },
+                            onC139Login = { showC139Login = true },
+                            onC139Logout = { c139ViewModel.logout() }
+                        )
+                        MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
+                        MainTab.Settings -> SettingsScreen(
+                            scrollBehavior = scrollBehavior,
+                            downloadThreads = settings.downloadThreads,
+                            onThreadsChange = { settings.downloadThreads = it },
+                            onAboutClick = { showAbout = true },
+                            backupManager = backupManager
+                        )
+                    }
                 }
             }
         }
+    }
+
+    // 关于云析：叠加覆盖层（淡入 + 轻微缩放过渡）
+    AnimatedVisibility(
+        visible = showAbout,
+        enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.96f),
+        exit = fadeOut(tween(160)) + scaleOut(tween(160), targetScale = 0.96f),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        AboutScreen(
+            onBack = { showAbout = false },
+            onPreviewOnboarding = {
+                context.getSharedPreferences("yunx_prefs", android.content.Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("onboarding_shown", false)
+                    .apply()
+                showAbout = false
+                showOnboarding = true
+            }
+        )
+    }
     }
 
     // 发现新版本弹窗（覆盖在主页之上）

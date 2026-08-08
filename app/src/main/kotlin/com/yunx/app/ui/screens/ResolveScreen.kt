@@ -4,6 +4,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -12,6 +13,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -159,37 +161,47 @@ fun ResolveScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        when (state) {
-            is ResolveUiState.Detail -> ShareDetailScreen(
-                session = state.session,
-                files = state.files,
-                viewModel = viewModel,
-                quarkCloudViewModel = quarkCloudViewModel,
-                scrollBehavior = scrollBehavior,
-                // 顶部左上角返回：退出文件页回到输入页（输入框内容保留）
-                onExit = { viewModel.backToInput() },
-                // 列表「返回上一级」：子目录回上级，根目录回输入页
-                onBack = { viewModel.navigateBack() }
-            )
-            is ResolveUiState.Loading -> LoadingContent()
-            else -> ResolveInputContent(
-                viewModel = viewModel,
-                scrollBehavior = scrollBehavior,
-                state = state,
-                link = link,
-                onLinkChange = { link = it },
-                pwd = pwd,
-                onPwdChange = {
-                    pwd = it
-                    pwdEdited = true
-                },
-                onClearLink = {
-                    link = ""
-                    pwd = ""
-                    pwdEdited = false
-                },
-                onClearPwd = { pwd = "" }
-            )
+        // 状态切换过渡：输入态/加载/详情/错误之间平滑淡入淡出 + 轻微位移
+        AnimatedContent(
+            targetState = state,
+            transitionSpec = {
+                (fadeIn(tween(200)) + slideInVertically(tween(200)) { it / 20 })
+                    .togetherWith(fadeOut(tween(140)))
+            },
+            label = "resolveState"
+        ) { s ->
+            when (s) {
+                is ResolveUiState.Detail -> ShareDetailScreen(
+                    session = s.session,
+                    files = s.files,
+                    viewModel = viewModel,
+                    quarkCloudViewModel = quarkCloudViewModel,
+                    scrollBehavior = scrollBehavior,
+                    // 顶部左上角返回：退出文件页回到输入页（输入框内容保留）
+                    onExit = { viewModel.backToInput() },
+                    // 列表「返回上一级」：子目录回上级，根目录回输入页
+                    onBack = { viewModel.navigateBack() }
+                )
+                is ResolveUiState.Loading -> LoadingContent()
+                else -> ResolveInputContent(
+                    viewModel = viewModel,
+                    scrollBehavior = scrollBehavior,
+                    state = s,
+                    link = link,
+                    onLinkChange = { link = it },
+                    pwd = pwd,
+                    onPwdChange = {
+                        pwd = it
+                        pwdEdited = true
+                    },
+                    onClearLink = {
+                        link = ""
+                        pwd = ""
+                        pwdEdited = false
+                    },
+                    onClearPwd = { pwd = "" }
+                )
+            }
         }
 
         // 剪贴板分享链接提示卡片（仅输入页、有待提示内容时显示，带弹出动画）
