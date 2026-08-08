@@ -62,6 +62,7 @@ import com.yunx.app.data.network.ShareLinkParser
 import com.yunx.app.data.network.SharePlatform
 import com.yunx.app.ui.resolve.DownloadLinkDialog
 import com.yunx.app.ui.resolve.ShareDetailScreen
+import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveUiState
 import com.yunx.app.ui.viewmodel.ResolveViewModel
 
@@ -73,6 +74,8 @@ import com.yunx.app.ui.viewmodel.ResolveViewModel
 fun ResolveScreen(
     scrollBehavior: TopAppBarScrollBehavior,
     viewModel: ResolveViewModel,
+    /** 夸克云盘浏览 ViewModel（分享文件转存目录选择用） */
+    quarkCloudViewModel: QuarkCloudViewModel,
     modifier: Modifier = Modifier
 ) {
     val state = viewModel.uiState
@@ -161,6 +164,7 @@ fun ResolveScreen(
                 session = state.session,
                 files = state.files,
                 viewModel = viewModel,
+                quarkCloudViewModel = quarkCloudViewModel,
                 scrollBehavior = scrollBehavior,
                 // 顶部左上角返回：退出文件页回到输入页（输入框内容保留）
                 onExit = { viewModel.backToInput() },

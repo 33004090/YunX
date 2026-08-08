@@ -70,6 +70,63 @@ class ResolveViewModel(
     var isFetchingDownloadLink by mutableStateOf(false)
         private set
 
+    /** 待转存文件（转存弹窗）；null 表示未在转存流程 */
+    var saveTarget by mutableStateOf<ShareFile?>(null)
+        private set
+
+    /** 转存中（UI 显示加载） */
+    var isSaving by mutableStateOf(false)
+        private set
+
+    /** 转存结果消息（Toast） */
+    var saveMessage by mutableStateOf<String?>(null)
+        private set
+
+    /** 当前分享是否支持转存（仅夸克实现） */
+    val canSave: Boolean
+        get() = currentPlatform == SharePlatform.QUARK
+
+    /** 请求转存：记录目标文件并打开目录选择弹窗 */
+    fun requestSave(file: ShareFile) {
+        saveTarget = file
+        saveMessage = null
+    }
+
+    fun dismissSave() {
+        saveTarget = null
+        isSaving = false
+    }
+
+    fun consumeSaveMessage() {
+        saveMessage = null
+    }
+
+    /** 转存到网盘指定目录（保存成功自动关闭弹窗） */
+    fun saveToCloud(toDirFid: String) {
+        val file = saveTarget ?: return
+        val s = session ?: return
+        viewModelScope.launch {
+            isSaving = true
+            try {
+                val credential = currentCredential()
+                if (credential.isNullOrBlank()) {
+                    saveMessage = "请先登录夸克网盘"
+                    return@launch
+                }
+                resolveRepository.saveToCloud(s, file, toDirFid, credential)
+                    .onSuccess {
+                        saveMessage = "已保存到夸克网盘"
+                        saveTarget = null
+                    }
+                    .onFailure {
+                        saveMessage = it.message ?: "转存失败"
+                    }
+            } finally {
+                isSaving = false
+            }
+        }
+    }
+
     /** 下载已入队事件：触发后由 UI 切换到下载页 */
     var downloadStarted by mutableStateOf(false)
         private set

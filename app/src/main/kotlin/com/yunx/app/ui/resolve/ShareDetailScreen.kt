@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +48,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareSession
+import com.yunx.app.ui.screens.SaveToCloudSheet
+import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
 
 /**
@@ -58,8 +61,10 @@ fun ShareDetailScreen(
     session: ShareSession,
     files: List<ShareFile>,
     viewModel: ResolveViewModel,
+    /** 夸克云盘浏览 ViewModel（转存目录选择用；与网盘页同一实例） */
+    quarkCloudViewModel: QuarkCloudViewModel,
     scrollBehavior: TopAppBarScrollBehavior,
-    /** 顶部左上角返回：退出文件页回到输入页 */
+    /** 顶部左上角返回：退出文件页回到输入页（输入框内容保留） */
     onExit: () -> Unit,
     /** 列表「返回上一级」：子目录回上级，根目录回输入页 */
     onBack: () -> Unit,
@@ -129,9 +134,24 @@ fun ShareDetailScreen(
                 file = file,
                 onClick = {
                     if (file.isdir) viewModel.openFolder(file) else viewModel.fetchDownloadLink(file)
+                },
+                // 仅夸克分享支持转存：行尾显示转存按钮
+                onSave = if (viewModel.canSave) {
+                    { viewModel.requestSave(file) }
+                } else {
+                    null
                 }
             )
         }
+    }
+
+    // 转存弹窗：浏览夸克网盘目录并保存
+    if (viewModel.saveTarget != null) {
+        SaveToCloudSheet(
+            resolveViewModel = viewModel,
+            cloudViewModel = quarkCloudViewModel,
+            onDismiss = { viewModel.dismissSave() }
+        )
     }
 }
 
@@ -238,7 +258,12 @@ internal fun CrumbBar(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ShareFileRow(file: ShareFile, onClick: () -> Unit) {
+internal fun ShareFileRow(
+    file: ShareFile,
+    onClick: () -> Unit,
+    /** 非空时行尾显示「转存」按钮 */
+    onSave: (() -> Unit)? = null
+) {
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -290,6 +315,16 @@ internal fun ShareFileRow(file: ShareFile, onClick: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+            if (onSave != null) {
+                IconButton(onClick = onSave, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        imageVector = Icons.Outlined.SaveAlt,
+                        contentDescription = "转存",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
             Icon(
                 imageVector = Icons.Outlined.ChevronRight,

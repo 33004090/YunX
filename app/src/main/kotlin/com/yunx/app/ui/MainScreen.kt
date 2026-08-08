@@ -364,7 +364,11 @@ fun MainScreen() {
             // 每个页面独立保存状态，切换 Tab 再切回来不丢失
             saveableStateHolder.SaveableStateProvider(currentTab) {
                 when (currentTab) {
-                    MainTab.Resolve -> ResolveScreen(scrollBehavior, resolveViewModel)
+                    MainTab.Resolve -> ResolveScreen(
+                        scrollBehavior,
+                        resolveViewModel,
+                        quarkCloudViewModel
+                    )
                     MainTab.Drive -> DriveScreen(
                         scrollBehavior = scrollBehavior,
                         quarkAccount = quarkAccount,
