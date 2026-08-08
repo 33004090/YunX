@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.DriveFileMove
@@ -649,4 +650,383 @@ private fun expireLabel(type: Int): String = when (type) {
     3 -> "7 天"
     4 -> "30 天"
     else -> "永久有效"
+}
+
+/** 批量操作步骤类型 */
+private enum class BatchStep { MENU, SHARE, MOVE, DELETE }
+
+/**
+ * 批量操作弹窗（长按多选后）：下载 / 分享 / 移动 / 删除。
+ * 分享/移动/删除复用与单文件一致的表单与独立目录浏览。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BatchActionSheet(
+    viewModel: QuarkCloudViewModel,
+    onDismiss: () -> Unit
+) {
+    var step by remember { mutableStateOf(BatchStep.MENU) }
+    val moveState by viewModel.moveUiState.collectAsState()
+    val operating = viewModel.isOperating
+    val count = viewModel.selected.size
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = {
+            if (!operating) onDismiss()
+        },
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        when (step) {
+            BatchStep.MENU -> BatchMenu(
+                count = count,
+                onDownload = {
+                    viewModel.downloadSelected()
+                    onDismiss()
+                },
+                onShare = { step = BatchStep.SHARE },
+                onMove = {
+                    viewModel.openMoveRoot()
+                    step = BatchStep.MOVE
+                },
+                onDelete = { step = BatchStep.DELETE }
+            )
+
+            BatchStep.SHARE -> BatchShareStep(
+                count = count,
+                viewModel = viewModel,
+                operating = operating,
+                onBack = { step = BatchStep.MENU }
+            )
+
+            BatchStep.MOVE -> BatchMoveStep(
+                count = count,
+                viewModel = viewModel,
+                moveState = moveState,
+                operating = operating,
+                onBack = { step = BatchStep.MENU },
+                onDone = onDismiss
+            )
+
+            BatchStep.DELETE -> BatchDeleteStep(
+                count = count,
+                viewModel = viewModel,
+                operating = operating,
+                onBack = { step = BatchStep.MENU },
+                onDone = onDismiss
+            )
+        }
+    }
+
+    // 分享创建成功：展示链接与提取码（保留弹窗以正常显示）
+    viewModel.shareResult?.let { info ->
+        ShareResultDialog(
+            info = info,
+            onDismiss = { viewModel.dismissShareResult() }
+        )
+    }
+}
+
+/** 批量操作菜单主界面 */
+@Composable
+private fun BatchMenu(
+    count: Int,
+    onDownload: () -> Unit,
+    onShare: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 32.dp)
+    ) {
+        // 标题
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Outlined.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "批量操作",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "已选 $count 项",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(8.dp))
+
+        ActionItem(
+            icon = Icons.Outlined.Download,
+            title = "下载",
+            desc = "批量下载到本机",
+            tint = MaterialTheme.colorScheme.primary,
+            onClick = onDownload
+        )
+        ActionItem(
+            icon = Icons.Outlined.Share,
+            title = "分享",
+            desc = "将选中项创建为一个分享链接",
+            tint = MaterialTheme.colorScheme.primary,
+            onClick = onShare
+        )
+        ActionItem(
+            icon = Icons.Outlined.DriveFileMove,
+            title = "移动到",
+            desc = "批量移动到网盘的其他目录",
+            tint = MaterialTheme.colorScheme.primary,
+            onClick = onMove
+        )
+        ActionItem(
+            icon = Icons.Outlined.Delete,
+            title = "删除",
+            desc = "批量移入回收站",
+            tint = MaterialTheme.colorScheme.error,
+            onClick = onDelete
+        )
+    }
+}
+
+/** 批量分享：提取码 + 有效期 */
+@Composable
+private fun BatchShareStep(
+    count: Int,
+    viewModel: QuarkCloudViewModel,
+    operating: Boolean,
+    onBack: () -> Unit
+) {
+    var withPassword by remember { mutableStateOf(false) }
+    var passcode by remember { mutableStateOf("") }
+    var expiredType by remember { mutableStateOf(1) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 32.dp)
+    ) {
+        StepHeader(title = "分享文件", subtitle = "已选 $count 项", onBack = onBack)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text("提取码", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = !withPassword,
+                onClick = { withPassword = false },
+                label = { Text("无提取码") },
+                colors = FilterChipDefaults.filterChipColors()
+            )
+            FilterChip(
+                selected = withPassword,
+                onClick = {
+                    withPassword = true
+                    if (passcode.isBlank()) passcode = randomPasscode()
+                },
+                label = { Text("设置提取码") },
+                colors = FilterChipDefaults.filterChipColors()
+            )
+        }
+        if (withPassword) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = passcode,
+                onValueChange = { passcode = it.take(4).filter { c -> c.isLetterOrDigit() } },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("4 位提取码") },
+                singleLine = true,
+                shape = MaterialTheme.shapes.large
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text("有效期", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            expireOptions.forEach { (name, value) ->
+                FilterChip(
+                    selected = expiredType == value,
+                    onClick = { expiredType = value },
+                    label = { Text(name) },
+                    colors = FilterChipDefaults.filterChipColors()
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Button(
+            onClick = {
+                viewModel.shareSelected(
+                    urlType = if (withPassword) 2 else 1,
+                    passcode = passcode,
+                    expiredType = expiredType
+                )
+                // 不关闭：等 shareResult 弹出分享结果
+            },
+            enabled = !operating && (!withPassword || passcode.length == 4),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+        ) {
+            if (operating) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Outlined.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("创建分享")
+            }
+        }
+    }
+}
+
+/** 批量移动：浏览目标目录并确认 */
+@Composable
+private fun BatchMoveStep(
+    count: Int,
+    viewModel: QuarkCloudViewModel,
+    moveState: QuarkCloudUiState,
+    operating: Boolean,
+    onBack: () -> Unit,
+    onDone: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 32.dp)
+    ) {
+        StepHeader(title = "移动到", subtitle = "已选 $count 项", onBack = onBack)
+
+        Spacer(modifier = Modifier.height(8.dp))
+        CrumbBar(
+            rootTitle = "根目录",
+            pathNames = (moveState as? QuarkCloudUiState.Loaded)?.pathNames ?: emptyList(),
+            onNavigate = { viewModel.moveNavigateToLevel(it) }
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        when (val s = moveState) {
+            is QuarkCloudUiState.Loading -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp),
+                contentAlignment = Alignment.Center
+            ) { CircularProgressIndicator() }
+
+            is QuarkCloudUiState.Error -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp),
+                contentAlignment = Alignment.Center
+            ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+
+            is QuarkCloudUiState.Loaded -> {
+                if (s.pathNames.isNotEmpty()) {
+                    BackToParentItem(onClick = { viewModel.moveBack() })
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                val dirs = s.files.filter { it.isdir }
+                if (dirs.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "当前目录没有子文件夹，可直接移动到此处",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(dirs, key = { it.fid }) { dir ->
+                            ShareFileRow(file = dir, onClick = { viewModel.openMoveFolder(dir) })
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        val dirName = (moveState as? QuarkCloudUiState.Loaded)?.pathNames?.lastOrNull() ?: "根目录"
+        Button(
+            onClick = {
+                val to = (moveState as? QuarkCloudUiState.Loaded)?.dirFid ?: "0"
+                viewModel.moveSelected(to)
+                onDone()
+            },
+            enabled = !operating,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+        ) {
+            if (operating) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Outlined.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("移动到此处（$dirName）")
+            }
+        }
+    }
+}
+
+/** 批量删除确认 */
+@Composable
+private fun BatchDeleteStep(
+    count: Int,
+    viewModel: QuarkCloudViewModel,
+    operating: Boolean,
+    onBack: () -> Unit,
+    onDone: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = { if (!operating) onBack() },
+        title = { Text("删除文件") },
+        text = { Text("确定要删除选中的 $count 项吗？删除后将移入回收站。") },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    viewModel.deleteSelected()
+                    onDone()
+                },
+                enabled = !operating
+            ) {
+                Text("删除", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onBack) { Text("取消") }
+        }
+    )
 }

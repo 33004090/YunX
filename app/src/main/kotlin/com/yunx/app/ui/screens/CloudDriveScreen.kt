@@ -1,6 +1,7 @@
 package com.yunx.app.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,10 +12,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -29,6 +35,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -57,6 +66,8 @@ fun CloudDriveScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
+    // 批量操作弹窗（多选模式底部栏触发）
+    var showBatchActions by remember { mutableStateOf(false) }
 
     // 操作结果 Toast（放在本层：弹窗关闭后仍能正常弹出）
     LaunchedEffect(viewModel.cloudMessage) {
@@ -98,11 +109,12 @@ fun CloudDriveScreen(
                 }
             }
 
-            is QuarkCloudUiState.Loaded -> PullToRefreshBox(
-                isRefreshing = viewModel.refreshing,
-                onRefresh = { viewModel.refresh() },
-                modifier = Modifier.fillMaxSize()
-            ) {
+            is QuarkCloudUiState.Loaded -> Box(modifier = Modifier.fillMaxSize()) {
+                PullToRefreshBox(
+                    isRefreshing = viewModel.refreshing,
+                    onRefresh = { viewModel.refresh() },
+                    modifier = Modifier.fillMaxSize()
+                ) {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -113,30 +125,54 @@ fun CloudDriveScreen(
             item {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onExit) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "夸克网盘",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "共 ${s.files.size} 项",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        if (viewModel.multiSelectMode) {
+                            // 多选模式：取消选择
+                            IconButton(onClick = { viewModel.exitMultiSelect() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "取消选择")
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "已选 ${viewModel.selected.size} 项",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = if (viewModel.selected.size == s.files.size) "已全选" else "点击选择更多文件",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(onClick = { viewModel.toggleSelectAll(s.files) }) {
+                                Text(if (viewModel.selected.size == s.files.size) "取消全选" else "全选")
+                            }
+                        } else {
+                            IconButton(onClick = onExit) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "夸克网盘",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "共 ${s.files.size} 项",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
-                    // 可点击面包屑：夸克网盘(根) > 目录1 > 目录2
-                    CrumbBar(
-                        rootTitle = "夸克网盘",
-                        pathNames = s.pathNames,
-                        onNavigate = { viewModel.navigateToLevel(it) }
-                    )
+                    // 可点击面包屑（多选模式下隐藏）
+                    if (!viewModel.multiSelectMode) {
+                        CrumbBar(
+                            rootTitle = "夸克网盘",
+                            pathNames = s.pathNames,
+                            onNavigate = { viewModel.navigateToLevel(it) }
+                        )
+                    }
                 }
             }
 
@@ -165,23 +201,39 @@ fun CloudDriveScreen(
                 ShareFileRow(
                     file = file,
                     onClick = {
-                        if (file.isdir) {
+                        if (viewModel.multiSelectMode) {
+                            viewModel.toggleSelect(file)
+                        } else if (file.isdir) {
                             viewModel.openFolder(file)
                         } else {
                             viewModel.openActions(file)
                         }
                     },
-                    // 只有文件夹显示「更多」三个点（文件点击即打开操作菜单，无需按钮）
-                    onMore = if (file.isdir) {
+                    // 多选模式：隐藏行尾按钮；非多选时文件夹显示「更多」、全部可长按进入多选
+                    onMore = if (!viewModel.multiSelectMode && file.isdir) {
                         { viewModel.openActions(file) }
                     } else {
                         null
-                    }
+                    },
+                    onLongClick = if (!viewModel.multiSelectMode) {
+                        { viewModel.enterMultiSelect(file) }
+                    } else {
+                        null
+                    },
+                    selected = viewModel.selected.contains(file)
                 )
             }
-            }
+                }
+                // 多选模式：底部批量操作栏
+                if (viewModel.multiSelectMode) {
+                    MultiSelectBar(
+                        count = viewModel.selected.size,
+                        onBatch = { showBatchActions = true }
+                    )
+                }
             }
         }
+    }
     }
 
     // 文件操作弹窗（更多按钮/点击文件 → 下载/分享/移动/重命名/删除）
@@ -190,6 +242,93 @@ fun CloudDriveScreen(
             file = file,
             viewModel = viewModel,
             onDismiss = { viewModel.dismissActions() }
+        )
+    }
+
+    // 批量操作弹窗（长按多选 → 底部栏）
+    if (showBatchActions) {
+        BatchActionSheet(
+            viewModel = viewModel,
+            onDismiss = { showBatchActions = false }
+        )
+    }
+}
+
+/** 多选模式底部批量操作栏 */
+@Composable
+private fun MultiSelectBar(
+    count: Int,
+    onBatch: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shadowElevation = 8.dp
+        ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BatchActionIcon(
+                icon = Icons.Outlined.Download,
+                label = "下载",
+                tint = MaterialTheme.colorScheme.primary,
+                onClick = onBatch
+            )
+            BatchActionIcon(
+                icon = Icons.Outlined.Share,
+                label = "分享",
+                tint = MaterialTheme.colorScheme.primary,
+                onClick = onBatch
+            )
+            BatchActionIcon(
+                icon = Icons.Outlined.DriveFileMove,
+                label = "移动",
+                tint = MaterialTheme.colorScheme.primary,
+                onClick = onBatch
+            )
+            BatchActionIcon(
+                icon = Icons.Outlined.Delete,
+                label = "删除",
+                tint = MaterialTheme.colorScheme.error,
+                onClick = onBatch
+            )
+        }
+        }
+    }
+}
+
+/** 批量操作图标项 */
+@Composable
+private fun BatchActionIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

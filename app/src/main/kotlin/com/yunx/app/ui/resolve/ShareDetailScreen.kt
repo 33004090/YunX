@@ -3,6 +3,7 @@ package com.yunx.app.ui.resolve
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -265,14 +267,26 @@ internal fun ShareFileRow(
     /** 非空时行尾显示「转存」按钮 */
     onSave: (() -> Unit)? = null,
     /** 非空时行尾显示「更多」按钮（打开文件操作菜单） */
-    onMore: (() -> Unit)? = null
+    onMore: (() -> Unit)? = null,
+    /** 长按进入多选（多选模式下为 null） */
+    onLongClick: (() -> Unit)? = null,
+    /** 多选模式：是否选中 */
+    selected: Boolean = false
 ) {
     Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            }
         )
     ) {
         Row(
@@ -281,6 +295,15 @@ internal fun ShareFileRow(
                 .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 多选模式：行首复选框
+            if (onLongClick == null) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = { onClick() },
+                    modifier = Modifier.size(36.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+            }
             Surface(
                 modifier = Modifier.size(40.dp),
                 shape = CircleShape,

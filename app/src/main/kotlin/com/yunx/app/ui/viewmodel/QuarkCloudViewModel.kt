@@ -1,6 +1,7 @@
 package com.yunx.app.ui.viewmodel
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -160,6 +161,39 @@ class QuarkCloudViewModel(
 
     // ---------- 文件操作 ----------
 
+    /** 多选模式（长按进入） */
+    var multiSelectMode by mutableStateOf(false)
+        private set
+
+    private val _selected = mutableStateListOf<ShareFile>()
+    val selected: List<ShareFile> get() = _selected
+
+    /** 长按进入多选并选中该文件 */
+    fun enterMultiSelect(file: ShareFile) {
+        multiSelectMode = true
+        _selected.clear()
+        _selected.add(file)
+    }
+
+    /** 切换选中状态 */
+    fun toggleSelect(file: ShareFile) {
+        if (_selected.contains(file)) _selected.remove(file) else _selected.add(file)
+    }
+
+    /** 全选/取消全选当前目录 */
+    fun toggleSelectAll(files: List<ShareFile>) {
+        if (_selected.size == files.size) _selected.clear()
+        else {
+            _selected.clear()
+            _selected.addAll(files)
+        }
+    }
+
+    fun exitMultiSelect() {
+        multiSelectMode = false
+        _selected.clear()
+    }
+
     /** 打开文件操作菜单 */
     fun openActions(file: ShareFile) {
         actionFile = file
@@ -313,6 +347,133 @@ class QuarkCloudViewModel(
                 // 才能在其内部弹出 ShareResultDialog（置空会导致弹窗销毁、分享结果延迟显示）
             } catch (e: Exception) {
                 cloudMessage = e.message ?: "分享失败"
+            } finally {
+                isOperating = false
+            }
+        }
+    }
+
+    // ---------- 批量操作（多选） ----------
+
+    /** 批量下载：逐个取直链加入下载队列 */
+    fun downloadSelected() {
+        val files = _selected.toList()
+        if (files.isEmpty()) return
+        viewModelScope.launch {
+            isOperating = true
+            try {
+                val cookie = cookieProvider()
+                if (cookie.isNullOrBlank()) {
+                    cloudMessage = "请先登录夸克网盘"
+                    return@launch
+                }
+                var okCount = 0
+                files.forEach { file ->
+                    runCatching {
+                        val link = api.getDownloadLink(file.fid, cookie) ?: return@runCatching
+                        val effectiveUrl = com.yunx.app.data.network.QuarkCdn.fastest(link.downloadUrl, cookie)
+                        downloadManager.enqueue(
+                            url = effectiveUrl,
+                            fileName = link.filename.ifBlank { file.fname },
+                            size = link.size,
+                            headers = mapOf(
+                                "Cookie" to cookie,
+                                "User-Agent" to com.yunx.app.data.network.QuarkConstants.API_USER_AGENT
+                            )
+                        )
+                        okCount++
+                    }
+                }
+                cloudMessage = "已加入 $okCount 个下载任务"
+                exitMultiSelect()
+            } catch (e: Exception) {
+                cloudMessage = e.message ?: "批量下载失败"
+            } finally {
+                isOperating = false
+            }
+        }
+    }
+
+    /** 批量分享选中文件 */
+    fun shareSelected(urlType: Int, passcode: String, expiredType: Int) {
+        val files = _selected.toList()
+        if (files.isEmpty()) return
+        viewModelScope.launch {
+            isOperating = true
+            try {
+                val cookie = cookieProvider()
+                if (cookie.isNullOrBlank()) {
+                    cloudMessage = "请先登录夸克网盘"
+                    return@launch
+                }
+                val shareId = api.createShare(
+                    fidList = files.map { it.fid },
+                    title = if (files.size == 1) files[0].fname else "分享 ${files.size} 个文件",
+                    urlType = urlType,
+                    passcode = passcode,
+                    expiredType = expiredType,
+                    cookie = cookie
+                ) ?: throw IllegalStateException("创建分享失败")
+                val info = api.getShareInfo(shareId, cookie)
+                    ?: throw IllegalStateException("获取分享链接失败")
+                shareResult = info
+                exitMultiSelect()
+            } catch (e: Exception) {
+                cloudMessage = e.message ?: "分享失败"
+            } finally {
+                isOperating = false
+            }
+        }
+    }
+
+    /** 批量移动到指定目录 */
+    fun moveSelected(toDirFid: String) {
+        val files = _selected.toList()
+        if (files.isEmpty()) return
+        viewModelScope.launch {
+            isOperating = true
+            try {
+                val cookie = cookieProvider()
+                if (cookie.isNullOrBlank()) {
+                    cloudMessage = "请先登录夸克网盘"
+                    return@launch
+                }
+                files.forEach { file ->
+                    api.moveFile(file.fid, toDirFid, cookie)
+                }
+                cloudMessage = "已移动 ${files.size} 项"
+                exitMultiSelect()
+                kotlinx.coroutines.delay(1500)
+                reloadCurrent()
+            } catch (e: Exception) {
+                cloudMessage = e.message ?: "移动失败"
+            } finally {
+                isOperating = false
+            }
+        }
+    }
+
+    /** 批量删除（二次确认由 UI 层负责） */
+    fun deleteSelected() {
+        val files = _selected.toList()
+        if (files.isEmpty()) return
+        viewModelScope.launch {
+            isOperating = true
+            try {
+                val cookie = cookieProvider()
+                if (cookie.isNullOrBlank()) {
+                    cloudMessage = "请先登录夸克网盘"
+                    return@launch
+                }
+                files.forEach { file ->
+                    api.deleteFile(file.fid, cookie)
+                }
+                cloudMessage = "已删除 ${files.size} 项"
+                exitMultiSelect()
+                kotlinx.coroutines.delay(1200)
+                reloadCurrent()
+            } catch (e: Exception) {
+                cloudMessage = e.message ?: "删除失败"
             } finally {
                 isOperating = false
             }
