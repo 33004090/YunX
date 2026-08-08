@@ -75,6 +75,7 @@ import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
 import com.yunx.app.ui.screens.UpdateDialog
 import com.yunx.app.ui.viewmodel.BaiduAccountViewModel
+import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
 import com.yunx.app.ui.viewmodel.C139AccountViewModel
 import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
@@ -208,6 +209,14 @@ fun MainScreen() {
             { xunleiRepository.getAccount()?.accessToken },
             { xunleiRepository.getAccount()?.deviceId },
             { xunleiRepository.getAccount()?.captchaToken },
+            downloadManager
+        )
+    )
+    // 百度网盘云盘浏览：点击已登录的百度卡片打开（cookie 从数据库读取）
+    val baiduCloudViewModel: BaiduCloudViewModel = viewModel(
+        factory = BaiduCloudViewModel.Factory(
+            baiduApi,
+            { baiduRepository.getAccount()?.cookie },
             downloadManager
         )
     )
@@ -399,7 +408,8 @@ fun MainScreen() {
                             scrollBehavior,
                             resolveViewModel,
                             quarkCloudViewModel,
-                            xunleiCloudViewModel
+                            xunleiCloudViewModel,
+                            baiduCloudViewModel
                         )
                         MainTab.Drive -> DriveScreen(
                             scrollBehavior = scrollBehavior,
@@ -411,6 +421,7 @@ fun MainScreen() {
                             quarkCloudViewModel = quarkCloudViewModel,
                             ucCloudViewModel = ucCloudViewModel,
                             xunleiCloudViewModel = xunleiCloudViewModel,
+                            baiduCloudViewModel = baiduCloudViewModel,
                             onQuarkLogin = { showQuarkLogin = true },
                             onQuarkLogout = { viewModel.logout() },
                             onDownloadStarted = { currentTab = MainTab.Download },

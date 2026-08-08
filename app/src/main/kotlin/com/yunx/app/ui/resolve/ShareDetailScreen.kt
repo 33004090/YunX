@@ -57,8 +57,10 @@ import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareSession
 import com.yunx.app.ui.items.MultiSelectAction
 import com.yunx.app.ui.items.MultiSelectBar
+import com.yunx.app.ui.screens.BaiduSaveSheet
 import com.yunx.app.ui.screens.SaveToCloudSheet
 import com.yunx.app.ui.screens.XunleiSaveSheet
+import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
 import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
@@ -76,6 +78,8 @@ fun ShareDetailScreen(
     quarkCloudViewModel: QuarkCloudViewModel,
     /** 迅雷网盘云盘浏览 ViewModel（迅雷分享转存目录选择用） */
     xunleiCloudViewModel: XunleiCloudViewModel,
+    /** 百度网盘云盘浏览 ViewModel（百度分享转存目录选择用） */
+    baiduCloudViewModel: BaiduCloudViewModel,
     scrollBehavior: TopAppBarScrollBehavior,
     /** 顶部左上角返回：退出文件页回到输入页（输入框内容保留） */
     onExit: () -> Unit,
@@ -240,16 +244,20 @@ fun ShareDetailScreen(
         )
     }
 
-    // 转存弹窗：浏览网盘目录并保存（单文件转存；夸克/迅雷按平台选目录选择器）
+    // 转存弹窗：浏览网盘目录并保存（单文件转存；夸克/迅雷/百度按平台选目录选择器）
     if (viewModel.saveTarget != null) {
-        if (viewModel.isSaveXunlei) {
-            XunleiSaveSheet(
+        when {
+            viewModel.isSaveXunlei -> XunleiSaveSheet(
                 resolveViewModel = viewModel,
                 cloudViewModel = xunleiCloudViewModel,
                 onDismiss = { viewModel.dismissSave() }
             )
-        } else {
-            SaveToCloudSheet(
+            viewModel.isSaveBaidu -> BaiduSaveSheet(
+                resolveViewModel = viewModel,
+                cloudViewModel = baiduCloudViewModel,
+                onDismiss = { viewModel.dismissSave() }
+            )
+            else -> SaveToCloudSheet(
                 resolveViewModel = viewModel,
                 cloudViewModel = quarkCloudViewModel,
                 onDismiss = { viewModel.dismissSave() }

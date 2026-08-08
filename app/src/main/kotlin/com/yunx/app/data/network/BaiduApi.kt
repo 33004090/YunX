@@ -363,6 +363,148 @@ suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String):
         }.getOrDefault(false)
     }
 
+    // ---------- 云盘文件管理（百度网盘功能） ----------
+
+    /** 列出个人网盘目录，返回 ShareFile（fid=fs_id，fidToken=绝对路径 path） */
+    suspend fun listCloudFiles(dir: String, cookie: String): List<ShareFile> = withContext(Dispatchers.IO) {
+        val url = "https://yun.baidu.com/api/list?clienttype=0&app_id=${BaiduConstants.APP_ID}" +
+            "&web=1&order=time&desc=1&dir=" + URLEncoder.encode(dir, "UTF-8") + "&num=100&page=1"
+        val request = Request.Builder()
+            .url(url)
+            .header("Cookie", cookie)
+            .header("User-Agent", BaiduConstants.UA_NETDISK)
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Referer", "https://yun.baidu.com/disk/main")
+            .get()
+            .build()
+        runCatching {
+            val json = executeJson(request)
+            if (json.optInt("errno") != 0) return@runCatching emptyList()
+            val array = json.optJSONArray("list") ?: return@runCatching emptyList()
+            buildList {
+                for (i in 0 until array.length()) {
+                    val item = array.optJSONObject(i) ?: continue
+                    add(
+                        ShareFile(
+                            fid = item.optString("fs_id"),
+                            fname = item.optString("server_filename"),
+                            fsize = item.optLong("size"),
+                            isdir = item.optInt("isdir") == 1,
+                            pdirFid = dir,
+                            fidToken = item.optString("path"),
+                            modifyTime = item.optString("server_mtime")
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** 重命名（filemanager opera=rename，按完整路径） */
+    suspend fun renameFile(path: String, newName: String, cookie: String): Boolean = withContext(Dispatchers.IO) {
+        val bdstoken = getBdstoken(cookie) ?: return@withContext false
+        val filelist = """[{"path":"$path","newname":"$newName"}]"""
+        val body = "filelist=${URLEncoder.encode(filelist, "UTF-8")}"
+        val request = Request.Builder()
+            .url("https://yun.baidu.com/api/filemanager?async=0&onnest=fail&opera=rename" +
+                "&bdstoken=$bdstoken&clienttype=0&app_id=${BaiduConstants.APP_ID}&web=1")
+            .header("Cookie", cookie)
+            .header("User-Agent", BaiduConstants.UA_NETDISK)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Referer", "https://yun.baidu.com/disk/main")
+            .post(body.toRequestBody(formMediaType))
+            .build()
+        runCatching {
+            val json = executeJson(request)
+            json.optInt("errno") == 0
+        }.getOrDefault(false)
+    }
+
+    /** 移动单个/多个文件（filemanager opera=move，path→dest，newname 保持原名） */
+    suspend fun moveFiles(
+        paths: List<String>,
+        dest: String,
+        cookie: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        val bdstoken = getBdstoken(cookie) ?: return@withContext false
+        val items = paths.joinToString(",") { p ->
+            val name = p.substringAfterLast('/')
+            """{"path":"$p","dest":"$dest","newname":"$name"}"""
+        }
+        val body = "filelist=${URLEncoder.encode("[$items]", "UTF-8")}"
+        val request = Request.Builder()
+            .url("https://pan.baidu.com/api/filemanager?async=2&onnest=fail&opera=move" +
+                "&bdstoken=$bdstoken&clienttype=0&app_id=${BaiduConstants.APP_ID}&web=1")
+            .header("Cookie", cookie)
+            .header("User-Agent", BaiduConstants.UA_NETDISK)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Referer", "https://yun.baidu.com/disk/main")
+            .post(body.toRequestBody(formMediaType))
+            .build()
+        runCatching {
+            val json = executeJson(request)
+            json.optInt("errno") == 0
+        }.getOrDefault(false)
+    }
+
+    /** 批量删除（filemanager opera=delete，按完整路径） */
+    suspend fun deleteFiles(paths: List<String>, cookie: String): Boolean = withContext(Dispatchers.IO) {
+        val bdstoken = getBdstoken(cookie) ?: return@withContext false
+        val body = "filelist=${URLEncoder.encode(paths.joinToString(",", "[", "]") { "\"$it\"" }, "UTF-8")}"
+        val request = Request.Builder()
+            .url("https://pan.baidu.com/api/filemanager?async=2&onnest=fail&opera=delete" +
+                "&bdstoken=$bdstoken&newVerify=1&clienttype=0&app_id=${BaiduConstants.APP_ID}&web=1")
+            .header("Cookie", cookie)
+            .header("User-Agent", BaiduConstants.UA_NETDISK)
+            .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+            .header("Referer", "https://yun.baidu.com/disk/main")
+            .post(body.toRequestBody(formMediaType))
+            .build()
+        runCatching {
+            val json = executeJson(request)
+            json.optInt("errno") == 0
+        }.getOrDefault(false)
+    }
+
+    /** 百度创建分享结果 */
+    data class BaiduShareResult(
+        val link: String,
+        val pwd: String,
+        val shareId: String
+    )
+
+    /** 创建分享（share/set，按 fs_id 列表 + 有效期 period + 4 位提取码） */
+    suspend fun createShare(
+        fsIds: List<String>,
+        period: Int,
+        pwd: String,
+        cookie: String
+    ): BaiduShareResult = withContext(Dispatchers.IO) {
+        val bdstoken = getBdstoken(cookie)
+            ?: throw BaiduApiException("获取 bdstoken 失败，请重新登录")
+        val fidList = fsIds.joinToString(",", "[", "]")
+        val body = "fid_list=${URLEncoder.encode(fidList, "UTF-8")}" +
+            "&schannel=4&channel_list=%5B%5D&period=$period&pwd=${urlEncode(pwd)}"
+        val request = Request.Builder()
+            .url("https://pan.baidu.com/share/set?channel=chunlei&web=1" +
+                "&app_id=${BaiduConstants.APP_ID}&bdstoken=$bdstoken&clienttype=0")
+            .header("Cookie", cookie)
+            .header("User-Agent", BaiduConstants.UA_NETDISK)
+            .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+            .header("Referer", "https://yun.baidu.com/disk/main")
+            .post(body.toRequestBody(formMediaType))
+            .build()
+        val json = executeJson(request)
+        checkErrno(json, "创建分享失败")
+        val link = json.optString("shorturl").ifBlank { json.optString("link") }
+            .takeIf { it.isNotBlank() } ?: throw BaiduApiException("未返回分享链接")
+        BaiduShareResult(
+            link = link,
+            pwd = pwd,
+            shareId = json.optString("shareid")
+        )
+    }
+
     // ---------- 公共 ----------
 
     private fun executeJson(request: Request): JSONObject {

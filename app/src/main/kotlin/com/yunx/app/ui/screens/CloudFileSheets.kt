@@ -576,10 +576,11 @@ internal fun ShareResultDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    // 拼接分享文案（按平台区分：UC / 迅雷 / 夸克）
+    // 拼接分享文案（按平台区分：UC / 迅雷 / 百度 / 夸克）
     val platformName = when {
         info.shareUrl.contains("uc.cn") -> "UC网盘"
         info.shareUrl.contains("xunlei.com") -> "迅雷网盘"
+        info.shareUrl.contains("baidu.com") -> "百度网盘"
         else -> "夸克网盘"
     }
     val shareText = buildString {
