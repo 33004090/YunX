@@ -58,9 +58,11 @@ import com.yunx.app.data.network.model.ShareSession
 import com.yunx.app.ui.items.MultiSelectAction
 import com.yunx.app.ui.items.MultiSelectBar
 import com.yunx.app.ui.screens.BaiduSaveSheet
+import com.yunx.app.ui.screens.C139SaveSheet
 import com.yunx.app.ui.screens.SaveToCloudSheet
 import com.yunx.app.ui.screens.XunleiSaveSheet
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
+import com.yunx.app.ui.viewmodel.C139CloudViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
 import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
@@ -80,6 +82,8 @@ fun ShareDetailScreen(
     xunleiCloudViewModel: XunleiCloudViewModel,
     /** 百度网盘云盘浏览 ViewModel（百度分享转存目录选择用） */
     baiduCloudViewModel: BaiduCloudViewModel,
+    /** 139 网盘云盘浏览 ViewModel（139 分享转存目录选择用） */
+    c139CloudViewModel: C139CloudViewModel,
     scrollBehavior: TopAppBarScrollBehavior,
     /** 顶部左上角返回：退出文件页回到输入页（输入框内容保留） */
     onExit: () -> Unit,
@@ -255,6 +259,11 @@ fun ShareDetailScreen(
             viewModel.isSaveBaidu -> BaiduSaveSheet(
                 resolveViewModel = viewModel,
                 cloudViewModel = baiduCloudViewModel,
+                onDismiss = { viewModel.dismissSave() }
+            )
+            viewModel.isSaveC139 -> C139SaveSheet(
+                resolveViewModel = viewModel,
+                cloudViewModel = c139CloudViewModel,
                 onDismiss = { viewModel.dismissSave() }
             )
             else -> SaveToCloudSheet(

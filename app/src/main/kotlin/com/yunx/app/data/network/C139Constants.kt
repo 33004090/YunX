@@ -40,6 +40,70 @@ object C139Constants {
     /** §14 分享接口 AES-CBC 固定密钥（16 字节，所有账号共用） */
     const val SHARE_AES_KEY = "PVGDwmcvfs1uV3d1"
 
+    // ---------- 个人网盘管理（§1：明文 JSON，无 Cookie；host personal-kd-njs） ----------
+
+    /** 个人网盘管理 host（明文 JSON + Authorization + mcloud-sign） */
+    const val CLOUD_BASE = "https://personal-kd-njs.yun.139.com"
+
+    // —— 渠道/上下文头（《139网盘管理认证失败修复》：缺失 → 04000005 认证失败；值来自成功抓包写死）——
+
+    /** 渠道 source / app-channel / huawei-channelSrc（三者同值） */
+    const val YUN_CHANNEL_SOURCE = "10000034"
+
+    /** mcloud-version */
+    const val MCLOUD_VERSION = "7.17.9"
+
+    /** mcloud-client */
+    const val MCLOUD_CLIENT = "10701"
+
+    /** mcloud-channel */
+    const val MCLOUD_CHANNEL = "1000101"
+
+    /** x-yun-module-type */
+    const val YUN_MODULE_TYPE = "100"
+
+    /** x-m4c-src */
+    const val M4C_SRC = "10002"
+
+    /** x-m4c-caller */
+    const val M4C_CALLER = "PC"
+
+    /** X-Deviceinfo */
+    const val X_DEVICEINFO = "||9|7.17.9|chrome|116.0.0.0|2cdaf7ada9e353c70eba99092e177991||windows 10||zh-CN|||"
+
+    /** x-yun-client-info */
+    const val X_CLIENT_INFO = "||9|7.17.9|chrome|116.0.0.0|2cdaf7ada9e353c70eba99092e177991||windows 10||zh-CN|||dW5kZWZpbmVk||"
+
+    /** 列目录（可加 type:"folder" 仅列文件夹） */
+    const val FILE_LIST_URL = "$CLOUD_BASE/hcy/file/list"
+
+    /** 重命名 */
+    const val FILE_UPDATE_URL = "$CLOUD_BASE/hcy/file/update"
+
+    /** 移动（异步，返回 taskId） */
+    const val BATCH_MOVE_URL = "$CLOUD_BASE/hcy/file/batchMove"
+
+    /** 删除（异步移入回收站，返回 taskId） */
+    const val BATCH_TRASH_URL = "$CLOUD_BASE/hcy/recyclebin/batchTrash"
+
+    /** 下载直链（OBS 预签名，900s 有效） */
+    const val DOWNLOAD_URL = "$CLOUD_BASE/hcy/file/getDownloadUrl"
+
+    /** 异步任务轮询 */
+    const val TASK_GET_URL = "$CLOUD_BASE/hcy/task/get"
+
+    /** 创建分享（yun.139.com orchestration，需 Cookie + mcloud-skey + Authorization） */
+    const val OUTLINK_CREATE_URL =
+        "https://yun.139.com/orchestration/personalCloud-rebuild/outlink/v1.0/getOutLink"
+
+    /** 转存：创建任务（share host，AES 加密） */
+    const val TRANSFER_CREATE_URL =
+        "$SHARE_BASE/yun-share/richlifeApp/devapp/IBatchOprTask/createOuterLinkBatchOprTask"
+
+    /** 转存：查询结果（share host，AES 加密） */
+    const val TRANSFER_QUERY_URL =
+        "$SHARE_BASE/yun-share/richlifeApp/devapp/IBatchOprTask/queryBatchOprTaskDetail"
+
     /** 分享接口必带设备/渠道上下文头（设备头修复文档 §3：缺任一即 9530） */
     const val SHARE_X_DEVICEINFO = "||3|12.27.0|||||chrome 150.0.0.0|360X444|zh-cn|||"
     const val SHARE_X_HUAWEI_CHANNELSRC = "10245500"

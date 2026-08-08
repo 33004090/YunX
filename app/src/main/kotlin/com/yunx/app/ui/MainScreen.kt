@@ -77,6 +77,7 @@ import com.yunx.app.ui.screens.UpdateDialog
 import com.yunx.app.ui.viewmodel.BaiduAccountViewModel
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
 import com.yunx.app.ui.viewmodel.C139AccountViewModel
+import com.yunx.app.ui.viewmodel.C139CloudViewModel
 import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
@@ -135,6 +136,7 @@ fun MainScreen() {
     val ucApi = remember { UCApi() }
     val xunleiApi = remember { XunleiApi() }
     val baiduApi = remember { BaiduApi() }
+    val c139Api = remember { C139Api() }
     val db = remember { AppDatabase.get(context) }
     val settings = remember { SettingsRepository(context) }
     val repository = remember {
@@ -220,6 +222,14 @@ fun MainScreen() {
             downloadManager
         )
     )
+    // 139 网盘云盘浏览：点击已登录的 139 卡片打开（cookie 从数据库读取）
+    val c139CloudViewModel: C139CloudViewModel = viewModel(
+        factory = C139CloudViewModel.Factory(
+            c139Api,
+            { c139Repository.getAccount()?.cookie },
+            downloadManager
+        )
+    )
     val xunleiResolveRepository = remember {
         XunleiResolveRepository(
             api = xunleiApi,
@@ -239,7 +249,6 @@ fun MainScreen() {
     val baiduResolveRepository = remember {
         BaiduResolveRepository(baiduApi)
     }
-    val c139Api = remember { C139Api() }
     val c139ResolveRepository = remember {
         C139ResolveRepository(c139Api)
     }
@@ -409,7 +418,8 @@ fun MainScreen() {
                             resolveViewModel,
                             quarkCloudViewModel,
                             xunleiCloudViewModel,
-                            baiduCloudViewModel
+                            baiduCloudViewModel,
+                            c139CloudViewModel
                         )
                         MainTab.Drive -> DriveScreen(
                             scrollBehavior = scrollBehavior,
@@ -422,6 +432,7 @@ fun MainScreen() {
                             ucCloudViewModel = ucCloudViewModel,
                             xunleiCloudViewModel = xunleiCloudViewModel,
                             baiduCloudViewModel = baiduCloudViewModel,
+                            c139CloudViewModel = c139CloudViewModel,
                             onQuarkLogin = { showQuarkLogin = true },
                             onQuarkLogout = { viewModel.logout() },
                             onDownloadStarted = { currentTab = MainTab.Download },

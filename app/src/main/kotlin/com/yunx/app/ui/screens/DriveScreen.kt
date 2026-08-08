@@ -50,10 +50,11 @@ import com.yunx.app.data.db.C139AccountEntity
 import com.yunx.app.data.db.QuarkAccountEntity
 import com.yunx.app.data.db.UCAccountEntity
 import com.yunx.app.data.db.XunleiAccountEntity
+import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
+import com.yunx.app.ui.viewmodel.C139CloudViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.UCCoudViewModel
 import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
-import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
 
 /**
  * 网盘账号展示模型。
@@ -89,6 +90,8 @@ fun DriveScreen(
     xunleiCloudViewModel: XunleiCloudViewModel,
     /** 百度网盘云盘浏览 ViewModel */
     baiduCloudViewModel: BaiduCloudViewModel,
+    /** 139 网盘云盘浏览 ViewModel */
+    c139CloudViewModel: C139CloudViewModel,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
     /** 夸克云盘下载入队后切换到「下载」Tab */
@@ -116,6 +119,8 @@ fun DriveScreen(
     var showXunleiCloud by rememberSaveable { mutableStateOf(false) }
     // 百度网盘云盘浏览：网盘 Tab 内切换（非全屏）
     var showBaiduCloud by rememberSaveable { mutableStateOf(false) }
+    // 139 网盘云盘浏览：网盘 Tab 内切换（非全屏）
+    var showC139Cloud by rememberSaveable { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
@@ -164,6 +169,7 @@ fun DriveScreen(
             showUCCloud -> 2
             showXunleiCloud -> 3
             showBaiduCloud -> 4
+            showC139Cloud -> 5
             else -> 0
         },
         transitionSpec = {
@@ -195,6 +201,12 @@ fun DriveScreen(
             viewModel = baiduCloudViewModel,
             scrollBehavior = scrollBehavior,
             onExit = { showBaiduCloud = false },
+            onDownloadStarted = onDownloadStarted
+        )
+        5 -> C139CloudScreen(
+            viewModel = c139CloudViewModel,
+            scrollBehavior = scrollBehavior,
+            onExit = { showC139Cloud = false },
             onDownloadStarted = onDownloadStarted
         )
             else -> LazyColumn(
@@ -273,18 +285,18 @@ fun DriveScreen(
             )
         }
         item(key = c139.id) {
-            DriveAccountCard(
-                account = c139,
-                onClick = if (c139.isLoggedIn) {
-                    { showC139Sheet = true }
-                } else {
-                    onC139Login
-                },
-                onMoreClick = if (c139.isLoggedIn) {
-                    { showC139Sheet = true }
-                } else {
-                    null
-                }
+        DriveAccountCard(
+            account = c139,
+            onClick = if (c139.isLoggedIn) {
+                { showC139Cloud = true }
+            } else {
+                onC139Login
+            },
+            onMoreClick = if (c139.isLoggedIn) {
+                { showC139Sheet = true }
+            } else {
+                null
+            }
             )
         }
         items(others, key = { it.id }) { account ->

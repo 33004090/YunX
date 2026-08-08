@@ -83,11 +83,12 @@ class ResolveViewModel(
     var saveMessage by mutableStateOf<String?>(null)
         private set
 
-    /** 当前分享是否支持转存（夸克 / 迅雷 / 百度） */
+    /** 当前分享是否支持转存（夸克 / 迅雷 / 百度 / 139） */
     val canSave: Boolean
         get() = currentPlatform == SharePlatform.QUARK ||
             currentPlatform == SharePlatform.XUNLEI ||
-            currentPlatform == SharePlatform.BAIDU
+            currentPlatform == SharePlatform.BAIDU ||
+            currentPlatform == SharePlatform.C139
 
     /** 当前分享是否为迅雷（UI 选择迅雷版转存目录选择器） */
     val isSaveXunlei: Boolean
@@ -96,6 +97,10 @@ class ResolveViewModel(
     /** 当前分享是否为百度（UI 选择百度版转存目录选择器） */
     val isSaveBaidu: Boolean
         get() = currentPlatform == SharePlatform.BAIDU
+
+    /** 当前分享是否为 139（UI 选择 139 版转存目录选择器） */
+    val isSaveC139: Boolean
+        get() = currentPlatform == SharePlatform.C139
 
     /** 请求转存：记录目标文件并打开目录选择弹窗 */
     fun requestSave(file: ShareFile) {
@@ -144,6 +149,21 @@ class ResolveViewModel(
                         baiduResolveRepository.transferFile(s, file, toDirFid, credential)
                             .onSuccess {
                                 saveMessage = "已保存到百度网盘"
+                                saveTarget = null
+                            }
+                            .onFailure {
+                                saveMessage = it.message ?: "转存失败"
+                            }
+                    }
+                    SharePlatform.C139 -> {
+                        val credential = currentCredential()
+                        if (credential.isNullOrBlank()) {
+                            saveMessage = "请先登录139网盘"
+                            return@launch
+                        }
+                        c139ResolveRepository.transferFile(s, file, toDirFid, credential)
+                            .onSuccess {
+                                saveMessage = "已保存到139网盘"
                                 saveTarget = null
                             }
                             .onFailure {
@@ -235,6 +255,10 @@ class ResolveViewModel(
                             SharePlatform.BAIDU -> {
                                 // 百度批量转存到根目录（绝对路径 "/"）
                                 baiduResolveRepository.transferFile(s, file, "/", credential)
+                            }
+                            SharePlatform.C139 -> {
+                                // 139 批量转存到根目录（fileId "/"）
+                                c139ResolveRepository.transferFile(s, file, "/", credential)
                             }
                             else -> {
                                 resolveRepository.saveToCloud(s, file, QuarkConstants.DEFAULT_PDIR_FID, credential)

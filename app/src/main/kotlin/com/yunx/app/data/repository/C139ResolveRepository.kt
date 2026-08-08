@@ -56,7 +56,33 @@ class C139ResolveRepository(private val api: C139Api) : ShareResolveRepository {
         file: ShareFile,
         toDirFid: String,
         cookie: String
-    ): Result<String> = Result.failure(UnsupportedOperationException("139 分享无需转存"))
+    ): Result<String> = runCatching {
+        val account = C139Constants.extractAccountFull(cookie)
+            ?: throw IllegalStateException("登录态缺少账号信息，请重新登录")
+        val authorization = C139Constants.extractAuthorization(cookie)
+        // 139 转存：创建批量任务（AES 加密接口）→ 轮询查询结果 → 返回转存后新 fileId
+        val taskId = api.createTransferTask(
+            coIDLst = listOf(file.fid),
+            catalogIDLst = emptyList(),
+            toFolderId = toDirFid,
+            linkID = session.shareId,
+            account = account,
+            authorization = authorization
+        ) ?: throw IllegalStateException("创建转存任务失败")
+        var newId: String? = null
+        for (i in 0 until 30) {
+            kotlinx.coroutines.delay(800)
+            val result = api.queryTransferTask(taskId, account, authorization)
+            if (result.done) {
+                newId = result.mapping[file.fid]
+                break
+            }
+        }
+        newId ?: throw IllegalStateException("转存超时或失败")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
 
     override suspend fun getDownloadLink(fid: String, cookie: String): Result<DownloadLink> =
         Result.failure(UnsupportedOperationException("139 分享请使用 getShareDownloadLink"))

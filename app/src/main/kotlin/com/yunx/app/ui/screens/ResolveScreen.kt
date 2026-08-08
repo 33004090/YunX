@@ -65,6 +65,7 @@ import com.yunx.app.data.network.SharePlatform
 import com.yunx.app.ui.resolve.DownloadLinkDialog
 import com.yunx.app.ui.resolve.ShareDetailScreen
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
+import com.yunx.app.ui.viewmodel.C139CloudViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveUiState
 import com.yunx.app.ui.viewmodel.ResolveViewModel
@@ -84,6 +85,8 @@ fun ResolveScreen(
     xunleiCloudViewModel: XunleiCloudViewModel,
     /** 百度网盘云盘浏览 ViewModel（百度分享转存目录选择用） */
     baiduCloudViewModel: BaiduCloudViewModel,
+    /** 139 网盘云盘浏览 ViewModel（139 分享转存目录选择用） */
+    c139CloudViewModel: C139CloudViewModel,
     modifier: Modifier = Modifier
 ) {
     val state = viewModel.uiState
@@ -184,6 +187,7 @@ fun ResolveScreen(
             quarkCloudViewModel = quarkCloudViewModel,
             xunleiCloudViewModel = xunleiCloudViewModel,
             baiduCloudViewModel = baiduCloudViewModel,
+            c139CloudViewModel = c139CloudViewModel,
             scrollBehavior = scrollBehavior,
                     // 顶部左上角返回：退出文件页回到输入页（输入框内容保留）
                     onExit = { viewModel.backToInput() },
