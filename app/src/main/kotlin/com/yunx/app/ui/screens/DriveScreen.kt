@@ -16,9 +16,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +43,7 @@ import com.yunx.app.data.db.C139AccountEntity
 import com.yunx.app.data.db.QuarkAccountEntity
 import com.yunx.app.data.db.UCAccountEntity
 import com.yunx.app.data.db.XunleiAccountEntity
+import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 
 /**
  * 网盘账号展示模型。
@@ -65,6 +71,8 @@ fun DriveScreen(
     xunleiAccount: XunleiAccountEntity?,
     baiduAccount: BaiduAccountEntity?,
     c139Account: C139AccountEntity?,
+    /** 夸克云盘浏览 ViewModel（网盘 Tab 内切换展示，非全屏） */
+    quarkCloudViewModel: QuarkCloudViewModel,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
     onUCLogin: () -> Unit,
@@ -82,6 +90,8 @@ fun DriveScreen(
     var showXunleiSheet by remember { mutableStateOf(false) }
     var showBaiduSheet by remember { mutableStateOf(false) }
     var showC139Sheet by remember { mutableStateOf(false) }
+    // 夸克云盘浏览：网盘 Tab 内切换（非全屏），切 Tab 再回来仍保留
+    var showCloud by rememberSaveable { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
@@ -142,9 +152,14 @@ fun DriveScreen(
             DriveAccountCard(
                 account = quark,
                 onClick = if (quark.isLoggedIn) {
-                    { showQuarkSheet = true }
+                    { showCloud = true }
                 } else {
                     onQuarkLogin
+                },
+                onMoreClick = if (quark.isLoggedIn) {
+                    { showQuarkSheet = true }
+                } else {
+                    null
                 }
             )
         }
@@ -155,6 +170,11 @@ fun DriveScreen(
                     { showUCSheet = true }
                 } else {
                     onUCLogin
+                },
+                onMoreClick = if (uc.isLoggedIn) {
+                    { showUCSheet = true }
+                } else {
+                    null
                 }
             )
         }
@@ -165,6 +185,11 @@ fun DriveScreen(
                     { showXunleiSheet = true }
                 } else {
                     onXunleiLogin
+                },
+                onMoreClick = if (xunlei.isLoggedIn) {
+                    { showXunleiSheet = true }
+                } else {
+                    null
                 }
             )
         }
@@ -175,6 +200,11 @@ fun DriveScreen(
                     { showBaiduSheet = true }
                 } else {
                     onBaiduLogin
+                },
+                onMoreClick = if (baidu.isLoggedIn) {
+                    { showBaiduSheet = true }
+                } else {
+                    null
                 }
             )
         }
@@ -185,12 +215,27 @@ fun DriveScreen(
                     { showC139Sheet = true }
                 } else {
                     onC139Login
+                },
+                onMoreClick = if (c139.isLoggedIn) {
+                    { showC139Sheet = true }
+                } else {
+                    null
                 }
             )
         }
         items(others, key = { it.id }) { account ->
             DriveAccountCard(account = account)
         }
+    }
+
+    // 夸克云盘浏览：网盘 Tab 内切换展示（保留顶部标题栏 + 底部导航）
+    if (showCloud) {
+        CloudDriveScreen(
+            viewModel = quarkCloudViewModel,
+            scrollBehavior = scrollBehavior,
+            onExit = { showCloud = false }
+        )
+        return
     }
 
     // 已登录夸克：点击卡片弹出账号信息底部弹窗
@@ -257,14 +302,20 @@ fun DriveScreen(
 @Composable
 private fun DriveAccountCard(
     account: DriveAccount,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    /** 已登录时右侧「三个点」更多按钮（打开账号弹窗）；null 则不显示 */
+    onMoreClick: (() -> Unit)? = null
 ) {
     val cardShape = MaterialTheme.shapes.large
     val cardColors = CardDefaults.cardColors(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     )
     val content: @Composable () -> Unit = {
-        DriveAccountCardContent(account = account, clickable = onClick != null)
+        DriveAccountCardContent(
+            account = account,
+            clickable = onClick != null,
+            onMoreClick = onMoreClick
+        )
     }
 
     if (onClick != null) {
@@ -284,7 +335,11 @@ private fun DriveAccountCard(
 }
 
 @Composable
-private fun DriveAccountCardContent(account: DriveAccount, clickable: Boolean) {
+private fun DriveAccountCardContent(
+    account: DriveAccount,
+    clickable: Boolean,
+    onMoreClick: (() -> Unit)? = null
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -330,6 +385,13 @@ private fun DriveAccountCardContent(account: DriveAccount, clickable: Boolean) {
         }
 
         when {
+            account.isLoggedIn && onMoreClick != null -> IconButton(onClick = onMoreClick) {
+                Icon(
+                    imageVector = Icons.Outlined.MoreVert,
+                    contentDescription = "更多",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             account.isLoggedIn -> LoginBadge(isLoggedIn = true)
             clickable -> Text(
                 text = "去登录",

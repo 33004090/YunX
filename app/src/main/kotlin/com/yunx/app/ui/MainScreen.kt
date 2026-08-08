@@ -68,6 +68,7 @@ import com.yunx.app.ui.viewmodel.BaiduAccountViewModel
 import com.yunx.app.ui.viewmodel.C139AccountViewModel
 import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
+import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
 import com.yunx.app.ui.viewmodel.UCAccountViewModel
 import com.yunx.app.ui.viewmodel.XunleiAccountViewModel
@@ -171,6 +172,13 @@ fun MainScreen() {
     )
     val c139ViewModel: C139AccountViewModel = viewModel(
         factory = C139AccountViewModel.Factory(c139Repository)
+    )
+    // 夸克云盘浏览：作为网盘 Tab 内容展示（非全屏），cookie 直接从数据库读取（避免 StateFlow 初始值为空的竞态）
+    val quarkCloudViewModel: QuarkCloudViewModel = viewModel(
+        factory = QuarkCloudViewModel.Factory(
+            api,
+            { repository.getAccount()?.cookie }
+        )
     )
     val xunleiResolveRepository = remember {
         XunleiResolveRepository(
@@ -364,6 +372,7 @@ fun MainScreen() {
                         xunleiAccount = xunleiAccount,
                         baiduAccount = baiduAccount,
                         c139Account = c139Account,
+                        quarkCloudViewModel = quarkCloudViewModel,
                         onQuarkLogin = { showQuarkLogin = true },
                         onQuarkLogout = { viewModel.logout() },
                         onUCLogin = { showUCLogin = true },

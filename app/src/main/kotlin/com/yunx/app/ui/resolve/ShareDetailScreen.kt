@@ -96,7 +96,7 @@ fun ShareDetailScreen(
                 }
                 // 可点击面包屑：分享名(根) > 目录1 > 目录2（点任意层级回退到该目录；当前层高亮）
                 CrumbBar(
-                    session = session,
+                    rootTitle = session.title.ifBlank { "分享内容" },
                     pathNames = pathNames,
                     onNavigate = { viewModel.navigateToLevel(it) }
                 )
@@ -136,7 +136,7 @@ fun ShareDetailScreen(
 }
 
 @Composable
-private fun BackToParentItem(onClick: () -> Unit) {
+internal fun BackToParentItem(onClick: () -> Unit) {
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -169,19 +169,19 @@ private fun BackToParentItem(onClick: () -> Unit) {
 }
 
 /**
- * 可点击面包屑：分享名(根) > 目录1 > 目录2。
+ * 可点击面包屑：根标题 > 目录1 > 目录2。
  * 非当前层可点击回退到对应目录；当前层高亮（文件夹图标 + 主题色）。
  * 横向滚动并自动定位到当前层。
  */
 @Composable
-private fun CrumbBar(
-    session: ShareSession,
+internal fun CrumbBar(
+    rootTitle: String,
     pathNames: List<String>,
     onNavigate: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val crumbs = buildList {
-        add(session.title.ifBlank { "分享内容" })
+        add(rootTitle.ifBlank { "根目录" })
         pathNames.forEach { add(it) }
     }
     val scroll = rememberScrollState()
@@ -238,7 +238,7 @@ private fun CrumbBar(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ShareFileRow(file: ShareFile, onClick: () -> Unit) {
+internal fun ShareFileRow(file: ShareFile, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -300,7 +300,7 @@ private fun ShareFileRow(file: ShareFile, onClick: () -> Unit) {
     }
 }
 
-private fun formatSize(bytes: Long): String {
+internal fun formatSize(bytes: Long): String {
     if (bytes <= 0) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB", "TB")
     var value = bytes.toDouble()

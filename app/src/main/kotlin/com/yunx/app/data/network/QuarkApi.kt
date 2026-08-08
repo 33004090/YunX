@@ -106,9 +106,9 @@ class QuarkApi(
         }
 
     /** 4.2 获取分享文件列表（sharepage/detail）
-     *  官方字段：file_name / size / dir(boolean) / share_fid_token，
-     *  与 kkdo.md 文档中的 fname/fsize/isdir/fid_token 不同，以抓包为准。
-     */
+ *  官方字段：file_name / size / dir(boolean) / share_fid_token，
+ *  与 kkdo.md 文档中的 fname/fsize/isdir/fid_token 不同，以抓包为准。
+ */
     suspend fun getShareFiles(
         shareId: String,
         stoken: String,
@@ -197,6 +197,56 @@ class QuarkApi(
         }
     }
 }
+
+    /** 云盘文件列表（网盘页浏览；抓包 /1/clouddrive/file/sort，pdir_fid=0 根目录）
+     *  响应 data.list[]，字段：fid / file_name / size / dir(boolean) / pdir_fid / updated_at。
+     */
+    suspend fun listCloudFiles(
+        pdirFid: String,
+        cookie: String,
+        page: Int = 1,
+        size: Int = 50
+    ): List<ShareFile>? = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append(QuarkConstants.CLOUD_FILE_SORT_URL)
+            append("&uc_param_str=")
+            append("&pdir_fid=").append(pdirFid)
+            append("&_page=").append(page)
+            append("&_size=").append(size)
+            append("&_fetch_total=1")
+            append("&_fetch_sub_dirs=0")
+            append("&_sort=file_type:asc,updated_at:desc")
+            append("&fetch_all_file=1")
+            append("&fetch_risk_file_name=1")
+        }
+        val request = Request.Builder()
+            .url(url)
+            .header("Cookie", cookie)
+            .header("User-Agent", QuarkConstants.API_USER_AGENT)
+            .header("Origin", "https://pan.quark.cn")
+            .header("Referer", "https://pan.quark.cn/")
+            .get()
+            .build()
+        parseData(request) { data ->
+            val array = data.optJSONArray("list") ?: JSONArray()
+            buildList {
+                for (i in 0 until array.length()) {
+                    val item = array.optJSONObject(i) ?: continue
+                    add(
+                        ShareFile(
+                            fid = item.optString("fid"),
+                            fname = item.optString("file_name").ifEmpty { item.optString("fname") },
+                            fsize = item.optLong("size"),
+                            isdir = item.optBoolean("dir", false),
+                            pdirFid = item.optString("pdir_fid"),
+                            fidToken = "",
+                            modifyTime = item.optString("updated_at")
+                        )
+                    )
+                }
+            }
+        }
+    }
 
     /** 创建目录（个人网盘），返回新目录 fid */
     suspend fun createFolder(name: String, parentFid: String, cookie: String): String? =

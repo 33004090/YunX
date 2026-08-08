@@ -50,6 +50,9 @@ object QuarkConstants {
     /** 个人网盘文件列表 / 创建目录 */
     const val FILE_URL = "$API_BASE/1/clouddrive/file?pr=ucpro&fr=pc"
 
+    /** 个人网盘文件列表（排序；抓包：pdir_fid=0 根目录，带完整 cookie） */
+    const val CLOUD_FILE_SORT_URL = "$API_BASE/1/clouddrive/file/sort?pr=ucpro&fr=pc"
+
     /** 转存分享文件 */
     const val SAVE_URL = "$API_BASE/1/clouddrive/share/sharepage/save?pr=ucpro&fr=pc"
 
