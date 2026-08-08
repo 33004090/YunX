@@ -44,6 +44,7 @@ import com.yunx.app.data.db.QuarkAccountEntity
 import com.yunx.app.data.db.UCAccountEntity
 import com.yunx.app.data.db.XunleiAccountEntity
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
+import com.yunx.app.ui.viewmodel.UCCoudViewModel
 
 /**
  * 网盘账号展示模型。
@@ -73,6 +74,8 @@ fun DriveScreen(
     c139Account: C139AccountEntity?,
     /** 夸克云盘浏览 ViewModel（网盘 Tab 内切换展示，非全屏） */
     quarkCloudViewModel: QuarkCloudViewModel,
+    /** UC 网盘云盘浏览 ViewModel */
+    ucCloudViewModel: UCCoudViewModel,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
     /** 夸克云盘下载入队后切换到「下载」Tab */
@@ -94,6 +97,8 @@ fun DriveScreen(
     var showC139Sheet by remember { mutableStateOf(false) }
     // 夸克云盘浏览：网盘 Tab 内切换（非全屏），切 Tab 再回来仍保留
     var showCloud by rememberSaveable { mutableStateOf(false) }
+    // UC 网盘云盘浏览：网盘 Tab 内切换（非全屏）
+    var showUCCloud by rememberSaveable { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
@@ -169,7 +174,7 @@ fun DriveScreen(
             DriveAccountCard(
                 account = uc,
                 onClick = if (uc.isLoggedIn) {
-                    { showUCSheet = true }
+                    { showUCCloud = true }
                 } else {
                     onUCLogin
                 },
@@ -236,6 +241,17 @@ fun DriveScreen(
             viewModel = quarkCloudViewModel,
             scrollBehavior = scrollBehavior,
             onExit = { showCloud = false },
+            onDownloadStarted = onDownloadStarted
+        )
+        return
+    }
+
+    // UC 网盘云盘浏览：网盘 Tab 内切换展示
+    if (showUCCloud) {
+        UCCoudScreen(
+            viewModel = ucCloudViewModel,
+            scrollBehavior = scrollBehavior,
+            onExit = { showUCCloud = false },
             onDownloadStarted = onDownloadStarted
         )
         return

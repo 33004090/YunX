@@ -168,8 +168,8 @@ class ChunkDownloader(private val client: OkHttpClient) {
         try {
             call.execute().use { response ->
                 if (!response.isSuccessful) {
-                    Log.w(TAG, "downloadFull: task=$taskId 非预期状态码 ${response.code}")
-                    return@use false
+                    // 抛带状态码的异常（不被 catch(IOException) 吞掉），让任务失败信息可见真实 HTTP 码
+                    throw IllegalStateException("下载失败 HTTP ${response.code}")
                 }
                 val body = response.body ?: return@use false
                 RandomAccessFile(partFile, "rw").use { raf ->
@@ -187,6 +187,8 @@ class ChunkDownloader(private val client: OkHttpClient) {
                 true
             }
         } catch (e: CancellationException) {
+            throw e
+        } catch (e: IllegalStateException) {
             throw e
         } catch (e: IOException) {
             Log.w(TAG, "downloadFull: task=$taskId IO异常: ${e.message}")

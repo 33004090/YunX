@@ -47,6 +47,32 @@ object UCConstants {
     /** 异步任务查询 */
     const val TASK_URL = "$API_BASE/1/clouddrive/task?pr=UCBrowser&fr=pc"
 
+    /** 云盘文件列表（排序；抓包 pc-api.uc.cn/1/clouddrive/file/sort） */
+    const val CLOUD_FILE_SORT_URL = "$API_BASE/1/clouddrive/file/sort?pr=UCBrowser&fr=pc"
+
+    /** 重命名文件（body: fid + file_name） */
+    const val RENAME_URL = "$API_BASE/1/clouddrive/file/rename?pr=UCBrowser&fr=pc"
+
+    /** 移动文件（body: action_type=1 + to_pdir_fid + filelist） */
+    const val MOVE_URL = "$API_BASE/1/clouddrive/file/move?pr=UCBrowser&fr=pc"
+
+    /** 创建分享（body: fid_list + title + url_type + passcode + expired_type + public_search） */
+    const val SHARE_CREATE_URL = "$API_BASE/1/clouddrive/share?pr=UCBrowser&fr=pc"
+
+    /** 查询分享信息（body: share_id → share_url / passcode / pwd_id） */
+    const val SHARE_INFO_URL = "$API_BASE/1/clouddrive/share/password?pr=UCBrowser&fr=pc"
+
+    /** UC 云盘客户端 UA（抓包：uc-cloud-drive Electron） */
+    const val CLOUD_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "uc-cloud-drive/1.6.1 Chrome/100.0.4896.160 Electron/18.3.5.16-b62cf9c50d Safari/537.36 Channel/ucpan_other_ch"
+
+    /** 云盘下载直链（抓包：?pr=UCBrowser&fr=pc&sys=win32&ve=1.6.1；个人云盘文件用，非 entry=ft 分享通道） */
+    const val CLOUD_DOWNLOAD_URL = "$API_BASE/1/clouddrive/file/download?pr=UCBrowser&fr=pc&sys=win32&ve=1.6.1"
+
+    /** 删除文件（body: action_type=2 + filelist + exclude_fids） */
+    const val DELETE_URL = "$API_BASE/1/clouddrive/file/delete?pr=UCBrowser&fr=pc"
+
     /** 临时转存目录名 */
     const val TEMP_DIR_NAME = "YunX临时转存"
 

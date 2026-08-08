@@ -560,14 +560,15 @@ private fun DeleteStep(
 
 /** 分享结果：链接 + 提取码 + 复制 */
 @Composable
-private fun ShareResultDialog(
+internal fun ShareResultDialog(
     info: com.yunx.app.data.network.model.ShareInfo,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    // 拼接分享文案（对齐官方格式）
+    // 拼接分享文案（按平台区分：UC/夸克）
+    val platformName = if (info.shareUrl.contains("uc.cn")) "UC网盘" else "夸克网盘"
     val shareText = buildString {
-        append("我用夸克网盘分享了「${info.title}」\n")
+        append("我用${platformName}分享了「${info.title}」\n")
         append("链接：${info.shareUrl}")
         if (info.passcode.isNotBlank()) {
             append("\n提取码：${info.passcode}")

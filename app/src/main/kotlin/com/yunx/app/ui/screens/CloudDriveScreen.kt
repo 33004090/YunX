@@ -248,8 +248,8 @@ fun CloudDriveScreen(
                         count = viewModel.selected.size,
                         actions = listOf(
                             MultiSelectAction("下载", Icons.Outlined.Download, MaterialTheme.colorScheme.primary) {
+                                // 批量下载：保持网盘页显示处理中弹窗，不自动切页
                                 viewModel.downloadSelected()
-                                onDownloadStarted()
                             },
                             MultiSelectAction("分享", Icons.Outlined.Share, MaterialTheme.colorScheme.primary) {
                                 batchInitial = com.yunx.app.ui.screens.BatchStep.SHARE

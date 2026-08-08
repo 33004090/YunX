@@ -2,6 +2,7 @@ package com.yunx.app.data.network
 
 import com.yunx.app.data.network.model.DownloadLink
 import com.yunx.app.data.network.model.ShareFile
+import com.yunx.app.data.network.model.ShareInfo
 import com.yunx.app.data.network.model.ShareToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -315,8 +316,7 @@ class UCApi(
             size = item.optLong("size")
         )
     }
-
-    suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withContext(Dispatchers.IO) {
+suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withContext(Dispatchers.IO) {
         val body = JSONObject().put("fids", JSONArray().put(fid)).toString()
         val request = postJson(UCConstants.DOWNLOAD_URL, cookie, body)
         val response = client.newCall(request).execute()
@@ -326,8 +326,11 @@ class UCApi(
         val json = runCatching { JSONObject(bodyStr) }.getOrElse {
             throw QuarkApiException("响应解析失败")
         }
-        if (json.optInt("status") != 200) {
-            throw QuarkApiException(json.optString("message").ifBlank { "获取下载链接失败" })
+        if (json.optInt("status") != 200 && json.optInt("code") != 0) {
+            throw QuarkApiException(
+                json.optString("message").ifBlank { "获取下载链接失败" },
+                json.optInt("code")
+            )
         }
         val array = json.optJSONArray("data") ?: throw QuarkApiException("响应缺少 data")
         if (array.length() == 0) throw QuarkApiException("未返回下载链接")
@@ -340,6 +343,169 @@ class UCApi(
         )
     }
 
+    // ---------- 云盘文件管理（UC 网盘功能） ----------
+
+    /** 云盘下载直链（抓包：个人云盘文件用 ?pr=UCBrowser&fr=pc&sys=win32&ve=1.6.1，非 entry=ft 分享通道） */
+    suspend fun cloudGetDownloadLink(fid: String, cookie: String): DownloadLink? = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("fids", JSONArray().put(fid)).toString()
+        val request = Request.Builder()
+            .url(UCConstants.CLOUD_DOWNLOAD_URL)
+            .header("Cookie", cookie)
+            .header("User-Agent", UCConstants.CLOUD_UA)
+            .header("Origin", "https://drive.uc.cn")
+            .header("Referer", "https://drive.uc.cn/")
+            .header("Content-Type", "application/json;charset=UTF-8")
+            .post(body.toRequestBody(jsonMediaType))
+            .build()
+        val response = client.newCall(request).execute()
+        val bodyStr = response.use {
+            it.body?.string() ?: throw QuarkApiException("获取下载链接失败：响应为空")
+        }
+        val json = runCatching { JSONObject(bodyStr) }.getOrElse {
+            throw QuarkApiException("响应解析失败")
+        }
+        if (json.optInt("status") != 200 && json.optInt("code") != 0) {
+            throw QuarkApiException(
+                json.optString("message").ifBlank { "获取下载链接失败" },
+                json.optInt("code")
+            )
+        }
+        val array = json.optJSONArray("data") ?: throw QuarkApiException("响应缺少 data")
+        if (array.length() == 0) throw QuarkApiException("未返回下载链接")
+        val item = array.optJSONObject(0) ?: throw QuarkApiException("未返回下载链接")
+        DownloadLink(
+            fid = item.optString("fid"),
+            filename = item.optString("file_name").ifEmpty { item.optString("filename") },
+            downloadUrl = item.optString("download_url"),
+            size = item.optLong("size")
+        )
+    }
+
+    /** 删除文件（抓包：action_type=2 + filelist + exclude_fids）；返回 task_id */
+    suspend fun deleteFile(fid: String, cookie: String): String? =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("action_type", 2)
+                .put("filelist", JSONArray().put(fid))
+                .put("exclude_fids", JSONArray())
+                .toString()
+            val request = postJson(UCConstants.DELETE_URL, cookie, body)
+            parseData(request) { data -> data.optString("task_id").takeIf { it.isNotBlank() } }
+        }
+
+    /** 云盘文件列表（抓包 /1/clouddrive/file/sort，pdir_fid=0 根目录） */
+    suspend fun listCloudFiles(
+        pdirFid: String,
+        cookie: String,
+        page: Int = 1,
+        size: Int = 50
+    ): List<ShareFile>? = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append(UCConstants.CLOUD_FILE_SORT_URL)
+            append("&pdir_fid=").append(pdirFid)
+            append("&_page=").append(page)
+            append("&_size=").append(size)
+            append("&_fetch_total=1")
+            append("&_fetch_sub_dirs=0")
+            append("&_sort=file_type%3Aasc%2Cupdated_at%3Adesc")
+        }
+        val request = Request.Builder()
+            .url(url)
+            .header("Cookie", cookie)
+            .header("User-Agent", UCConstants.CLOUD_UA)
+            .header("Origin", "https://drive.uc.cn")
+            .header("Referer", "https://drive.uc.cn/")
+            .get()
+            .build()
+        parseData(request) { data ->
+            val array = data.optJSONArray("list") ?: JSONArray()
+            buildList {
+                for (i in 0 until array.length()) {
+                    val item = array.optJSONObject(i) ?: continue
+                    add(
+                        ShareFile(
+                            fid = item.optString("fid"),
+                            fname = item.optString("file_name").ifEmpty { item.optString("fname") },
+                            fsize = item.optLong("size"),
+                            isdir = item.optBoolean("dir", false),
+                            pdirFid = item.optString("pdir_fid"),
+                            fidToken = "",
+                            modifyTime = item.optString("updated_at")
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /** 重命名（抓包：POST file/rename） */
+    suspend fun renameFile(fid: String, newName: String, cookie: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("fid", fid)
+                .put("file_name", newName)
+                .toString()
+            val request = postJson(UCConstants.RENAME_URL, cookie, body)
+            runCatching {
+                client.newCall(request).execute().use { response ->
+                    JSONObject(response.body?.string() ?: "{}").optInt("status") == 200
+                }
+            }.getOrDefault(false)
+        }
+
+    /** 移动（抓包：action_type=1 + to_pdir_fid + filelist）；返回 task_id */
+    suspend fun moveFile(fid: String, toPdirFid: String, cookie: String): String? =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("action_type", 1)
+                .put("to_pdir_fid", toPdirFid)
+                .put("filelist", JSONArray().put(fid))
+                .put("exclude_fids", JSONArray())
+                .toString()
+            val request = postJson(UCConstants.MOVE_URL, cookie, body)
+            parseData(request) { data -> data.optString("task_id").takeIf { it.isNotBlank() } }
+        }
+
+    /** 创建分享（抓包：POST /1/clouddrive/share，url_type 1=无提取码 2=带提取码，expired_type 1永久/2一天/3七天/4三十天） */
+    suspend fun createShare(
+        fidList: List<String>,
+        title: String,
+        urlType: Int,
+        passcode: String,
+        expiredType: Int,
+        cookie: String
+    ): String? = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("fid_list", JSONArray().apply { fidList.forEach { put(it) } })
+            .put("title", title.ifBlank { "分享文件" })
+            .put("url_type", urlType)
+            .put("expired_type", expiredType)
+            .put("public_search", 0)
+            .apply { if (passcode.isNotBlank()) put("passcode", passcode) }
+            .toString()
+        val request = postJson(UCConstants.SHARE_CREATE_URL, cookie, body)
+        parseData(request) { data ->
+            data.optJSONObject("task_resp")
+                ?.optJSONObject("data")
+                ?.optString("share_id")
+                ?.takeIf { it.isNotBlank() }
+        }
+    }
+
+    /** 查询分享信息（抓包：POST share/password body={share_id} → 链接/提取码/标题） */
+    suspend fun getShareInfo(shareId: String, cookie: String): ShareInfo? = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("share_id", shareId).toString()
+        val request = postJson(UCConstants.SHARE_INFO_URL, cookie, body)
+        parseData(request) { data ->
+            ShareInfo(
+                shareUrl = data.optString("share_url"),
+                passcode = data.optString("passcode"),
+                pwdId = data.optString("pwd_id"),
+                title = data.optString("title"),
+                expiredType = data.optInt("expired_type")
+            )
+        }
+    }
     // ---------- 请求构造与响应解析 ----------
 
     private fun get(url: String, cookie: String): Request =

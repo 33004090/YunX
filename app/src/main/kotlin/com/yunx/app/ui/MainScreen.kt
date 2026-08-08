@@ -70,6 +70,7 @@ import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
+import com.yunx.app.ui.viewmodel.UCCoudViewModel
 import com.yunx.app.ui.viewmodel.UCAccountViewModel
 import com.yunx.app.ui.viewmodel.XunleiAccountViewModel
 import kotlinx.coroutines.launch
@@ -178,6 +179,14 @@ fun MainScreen() {
         factory = QuarkCloudViewModel.Factory(
             api,
             { repository.getAccount()?.cookie },
+            downloadManager
+        )
+    )
+    // UC 网盘云盘浏览：点击已登录的 UC 卡片打开（cookie 从数据库读取）
+    val ucCloudViewModel: UCCoudViewModel = viewModel(
+        factory = UCCoudViewModel.Factory(
+            ucApi,
+            { ucRepository.getAccount()?.cookie },
             downloadManager
         )
     )
@@ -378,6 +387,7 @@ fun MainScreen() {
                         baiduAccount = baiduAccount,
                         c139Account = c139Account,
                         quarkCloudViewModel = quarkCloudViewModel,
+                        ucCloudViewModel = ucCloudViewModel,
                         onQuarkLogin = { showQuarkLogin = true },
                         onQuarkLogout = { viewModel.logout() },
                         onDownloadStarted = { currentTab = MainTab.Download },
