@@ -177,7 +177,15 @@ fun MainScreen() {
             api = xunleiApi,
             accountProvider = { xunleiRepository.getAccount()?.accessToken },
             deviceIdProvider = { xunleiRepository.getAccount()?.deviceId },
-            captchaProvider = { xunleiRepository.getAccount()?.captchaToken }
+            captchaProvider = { xunleiRepository.getAccount()?.captchaToken },
+            // token 过期（含导入恢复后旧 token 过期）自动用 refresh_token 刷新并持久化
+            refreshProvider = {
+                val acc = xunleiRepository.getAccount()
+                if (acc == null || acc.refreshToken.isBlank()) null
+                else xunleiApi.refreshToken(acc.refreshToken, acc.deviceId)?.also { (at, nrt) ->
+                    xunleiRepository.updateTokens(at, nrt)
+                }
+            }
         )
     }
     val baiduResolveRepository = remember {

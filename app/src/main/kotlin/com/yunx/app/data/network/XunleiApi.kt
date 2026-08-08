@@ -45,6 +45,7 @@ class XunleiApi(
 ) {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private val formMediaType = "application/x-www-form-urlencoded".toMediaType()
 
     /** captcha_invalid 时刷新出的新 captcha_token（后续请求优先使用） */
     @Volatile
@@ -223,6 +224,45 @@ class XunleiApi(
     fun cacheUserId(accessToken: String) {
         if (currentUserId.isBlank()) currentUserId = jwtSub(accessToken)
     }
+
+    /**
+     * 用 refresh_token 刷新 access_token（OAuth2 refresh_token）。
+     * 导入恢复后旧 token 可能已过期（12h），刷新后立即有效。
+     * @return 新 (access_token, refresh_token)；失败返回 null
+     */
+    suspend fun refreshToken(refreshToken: String, deviceId: String): Pair<String, String>? =
+        withContext(Dispatchers.IO) {
+            val body = "grant_type=refresh_token" +
+                "&client_id=${XunleiConstants.APP_CLIENT_ID}" +
+                "&client_secret=${XunleiConstants.APP_CLIENT_SECRET}" +
+                "&refresh_token=${java.net.URLEncoder.encode(refreshToken, "UTF-8")}"
+            val request = Request.Builder()
+                .url(XunleiConstants.REFRESH_URL)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("X-Device-Id", deviceId)
+                .post(body.toRequestBody(formMediaType))
+                .build()
+            runCatching {
+                client.newCall(request).execute().use { resp ->
+                    val json = JSONObject(resp.body?.string() ?: "{}")
+                    val at = json.optString("access_token").ifBlank { json.optString("accessToken") }
+                    val rt = json.optString("refresh_token").ifBlank { json.optString("refreshToken") }
+                    if (at.isBlank()) null else {
+                        jwtSub(at).takeIf { it.isNotBlank() }?.let { currentUserId = it }
+                        at to rt
+                    }
+                }
+            }.getOrNull()
+        }
+
+    /** 解析 JWT 的 exp（秒）；解析失败返回 0 */
+    fun jwtExp(token: String): Long = runCatching {
+        val payload = token.split(".").getOrNull(1) ?: return@runCatching 0L
+        val json = String(
+            android.util.Base64.decode(payload, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING)
+        )
+        JSONObject(json).optLong("exp")
+    }.getOrDefault(0L)
 
     /** 从 JWT 中解析 sub（用户 ID） */
     private fun jwtSub(token: String): String = runCatching {

@@ -76,6 +76,9 @@ object XunleiConstants {
     /** 换取 access_token（官方 app 抓包：POST /v1/auth/signin/token，body 带 signin_token=sessionID） */
     const val TOKEN_URL = "$AUTH_BASE/v1/auth/signin/token"
 
+    /** 刷新 access_token（OAuth2 refresh_token；导入恢复后 token 过期自动续期） */
+    const val REFRESH_URL = "$AUTH_BASE/v1/auth/token"
+
     // ---------- Pan 端点 ----------
 
     /** 文件列表 / 详情 / 建目录 */

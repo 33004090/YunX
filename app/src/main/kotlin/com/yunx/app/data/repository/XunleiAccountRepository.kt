@@ -83,6 +83,12 @@ class XunleiAccountRepository(
         return true
     }
 
+    /** 刷新 token 后更新 accessToken/refreshToken（deviceId/captchaToken 保持不变） */
+    suspend fun updateTokens(accessToken: String, refreshToken: String) {
+        val acc = dao.getAccount() ?: return
+        dao.upsert(acc.copy(accessToken = accessToken, refreshToken = refreshToken))
+    }
+
     suspend fun logout() {
         dao.clear()
     }
