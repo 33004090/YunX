@@ -380,6 +380,7 @@ fun MainScreen() {
                         quarkCloudViewModel = quarkCloudViewModel,
                         onQuarkLogin = { showQuarkLogin = true },
                         onQuarkLogout = { viewModel.logout() },
+                        onDownloadStarted = { currentTab = MainTab.Download },
                         onUCLogin = { showUCLogin = true },
                         onUCLogout = { ucViewModel.logout() },
                         onXunleiLogin = { showXunleiLogin = true },

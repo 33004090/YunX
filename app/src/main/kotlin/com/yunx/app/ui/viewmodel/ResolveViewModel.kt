@@ -1,6 +1,7 @@
 package com.yunx.app.ui.viewmodel
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -130,6 +131,97 @@ class ResolveViewModel(
     /** 下载已入队事件：触发后由 UI 切换到下载页 */
     var downloadStarted by mutableStateOf(false)
         private set
+
+    // ---------- 长按多选（解析页文件列表） ----------
+
+    /** 多选模式（长按进入） */
+    var multiSelectMode by mutableStateOf(false)
+        private set
+
+    private val _selected = mutableStateListOf<ShareFile>()
+    val selected: List<ShareFile> get() = _selected
+
+    /** 批量处理中（UI 显示加载弹窗） */
+    var isBatchWorking by mutableStateOf(false)
+        private set
+
+    fun enterMultiSelect(file: ShareFile) {
+        multiSelectMode = true
+        _selected.clear()
+        _selected.add(file)
+    }
+
+    fun toggleSelect(file: ShareFile) {
+        if (_selected.contains(file)) _selected.remove(file) else _selected.add(file)
+    }
+
+    fun toggleSelectAll(files: List<ShareFile>) {
+        if (_selected.size == files.size) _selected.clear()
+        else {
+            _selected.clear()
+            _selected.addAll(files)
+        }
+    }
+
+    fun exitMultiSelect() {
+        multiSelectMode = false
+        _selected.clear()
+    }
+
+    /** 批量转存到夸克网盘根目录（仅夸克分享支持） */
+    fun batchSaveToCloud() {
+        val files = _selected.toList()
+        val s = session ?: return
+        viewModelScope.launch {
+            isBatchWorking = true
+            try {
+                val credential = currentCredential()
+                if (credential.isNullOrBlank()) {
+                    downloadError = "请先登录夸克网盘"
+                    return@launch
+                }
+                var okCount = 0
+                files.forEach { file ->
+                    runCatching {
+                        resolveRepository.saveToCloud(s, file, QuarkConstants.DEFAULT_PDIR_FID, credential)
+                    }.onSuccess { okCount++ }
+                }
+                downloadError = if (okCount > 0) "已转存 $okCount 项到夸克网盘" else "转存失败"
+                exitMultiSelect()
+            } finally {
+                isBatchWorking = false
+            }
+        }
+    }
+
+    /** 批量下载：逐个取直链入队（复用 startDownload 的头/UA/CDN 优选逻辑） */
+    fun batchDownload() {
+        val files = _selected.toList()
+        val s = session ?: return
+        viewModelScope.launch {
+            isBatchWorking = true
+            try {
+                val credential = currentCredential()
+                if (credential.isNullOrBlank()) {
+                    downloadError = "请先登录网盘"
+                    return@launch
+                }
+                var okCount = 0
+                files.forEach { file ->
+                    runCatching {
+                        currentRepo().getShareDownloadLink(s, file, credential).getOrNull()?.let { link ->
+                            startDownload(link)
+                            okCount++
+                        }
+                    }
+                }
+                downloadError = if (okCount > 0) "已加入 $okCount 个下载任务" else "获取下载链接失败"
+                exitMultiSelect()
+            } finally {
+                isBatchWorking = false
+            }
+        }
+    }
 
     fun consumeDownloadStarted() {
         downloadStarted = false

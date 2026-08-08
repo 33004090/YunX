@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.yunx.app.ui.items.MultiSelectAction
+import com.yunx.app.ui.items.MultiSelectBar
 import com.yunx.app.ui.resolve.BackToParentItem
 import com.yunx.app.ui.resolve.CrumbBar
 import com.yunx.app.ui.resolve.ShareFileRow
@@ -62,18 +66,31 @@ fun CloudDriveScreen(
     viewModel: QuarkCloudViewModel,
     scrollBehavior: TopAppBarScrollBehavior,
     onExit: () -> Unit,
+    /** 下载入队后通知上层切换到「下载」Tab（对齐解析页行为） */
+    onDownloadStarted: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
-    // 批量操作弹窗（多选模式底部栏触发）
+    // 批量操作弹窗（多选模式底部栏触发：分享/移动需要设置或选目录，下载/删除直接执行）
     var showBatchActions by remember { mutableStateOf(false) }
+    var batchInitial by remember { mutableStateOf(com.yunx.app.ui.screens.BatchStep.MENU) }
+    // 批量删除二次确认
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     // 操作结果 Toast（放在本层：弹窗关闭后仍能正常弹出）
     LaunchedEffect(viewModel.cloudMessage) {
         viewModel.cloudMessage?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
             viewModel.consumeMessage()
+        }
+    }
+
+    // 下载入队后通知上层切换到「下载」Tab（消费事件，避免再次进入本页重复触发）
+    LaunchedEffect(viewModel.downloadTriggered) {
+        if (viewModel.downloadTriggered > 0) {
+            viewModel.consumeDownloadTriggered()
+            onDownloadStarted()
         }
     }
 
@@ -220,15 +237,32 @@ fun CloudDriveScreen(
                     } else {
                         null
                     },
-                    selected = viewModel.selected.contains(file)
+                    selected = viewModel.selected.contains(file),
+                    showCheckbox = viewModel.multiSelectMode
                 )
             }
                 }
-                // 多选模式：底部批量操作栏
+                // 多选模式：底部批量操作栏（下载/删除直接执行，分享/移动打开对应弹窗）
                 if (viewModel.multiSelectMode) {
                     MultiSelectBar(
                         count = viewModel.selected.size,
-                        onBatch = { showBatchActions = true }
+                        actions = listOf(
+                            MultiSelectAction("下载", Icons.Outlined.Download, MaterialTheme.colorScheme.primary) {
+                                viewModel.downloadSelected()
+                                onDownloadStarted()
+                            },
+                            MultiSelectAction("分享", Icons.Outlined.Share, MaterialTheme.colorScheme.primary) {
+                                batchInitial = com.yunx.app.ui.screens.BatchStep.SHARE
+                                showBatchActions = true
+                            },
+                            MultiSelectAction("移动", Icons.Outlined.DriveFileMove, MaterialTheme.colorScheme.primary) {
+                                batchInitial = com.yunx.app.ui.screens.BatchStep.MOVE
+                                showBatchActions = true
+                            },
+                            MultiSelectAction("删除", Icons.Outlined.Delete, MaterialTheme.colorScheme.error) {
+                                showDeleteConfirm = true
+                            }
+                        )
                     )
                 }
             }
@@ -245,90 +279,53 @@ fun CloudDriveScreen(
         )
     }
 
-    // 批量操作弹窗（长按多选 → 底部栏）
+    // 批量操作弹窗（长按多选 → 底部栏分享/移动）
     if (showBatchActions) {
         BatchActionSheet(
             viewModel = viewModel,
+            initialStep = batchInitial,
             onDismiss = { showBatchActions = false }
         )
     }
-}
 
-/** 多选模式底部批量操作栏 */
-@Composable
-private fun MultiSelectBar(
-    count: Int,
-    onBatch: () -> Unit
-) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 8.dp
-        ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            BatchActionIcon(
-                icon = Icons.Outlined.Download,
-                label = "下载",
-                tint = MaterialTheme.colorScheme.primary,
-                onClick = onBatch
-            )
-            BatchActionIcon(
-                icon = Icons.Outlined.Share,
-                label = "分享",
-                tint = MaterialTheme.colorScheme.primary,
-                onClick = onBatch
-            )
-            BatchActionIcon(
-                icon = Icons.Outlined.DriveFileMove,
-                label = "移动",
-                tint = MaterialTheme.colorScheme.primary,
-                onClick = onBatch
-            )
-            BatchActionIcon(
-                icon = Icons.Outlined.Delete,
-                label = "删除",
-                tint = MaterialTheme.colorScheme.error,
-                onClick = onBatch
-            )
-        }
-        }
-    }
-}
-
-/** 批量操作图标项 */
-@Composable
-private fun BatchActionIcon(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    tint: androidx.compose.ui.graphics.Color,
-    onClick: () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = tint,
-            modifier = Modifier.size(22.dp)
+    // 批量删除二次确认（底部栏点删除直接弹确认）
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除文件") },
+            text = { Text("确定要删除选中的 ${viewModel.selected.size} 项吗？删除后将移入回收站。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        viewModel.deleteSelected()
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+            }
         )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    // 操作执行中：加载弹窗（下载取链/分享/移动/删除）
+    if (viewModel.isOperating) {
+        AlertDialog(
+            onDismissRequest = { },
+            confirmButton = { },
+            title = { Text("处理中") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("正在处理，请稍候…", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         )
     }
 }

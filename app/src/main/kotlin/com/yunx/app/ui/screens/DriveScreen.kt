@@ -75,6 +75,8 @@ fun DriveScreen(
     quarkCloudViewModel: QuarkCloudViewModel,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
+    /** 夸克云盘下载入队后切换到「下载」Tab */
+    onDownloadStarted: () -> Unit = {},
     onUCLogin: () -> Unit,
     onUCLogout: () -> Unit,
     onXunleiLogin: () -> Unit,
@@ -233,7 +235,8 @@ fun DriveScreen(
         CloudDriveScreen(
             viewModel = quarkCloudViewModel,
             scrollBehavior = scrollBehavior,
-            onExit = { showCloud = false }
+            onExit = { showCloud = false },
+            onDownloadStarted = onDownloadStarted
         )
         return
     }

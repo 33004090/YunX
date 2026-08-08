@@ -58,6 +58,15 @@ class QuarkCloudViewModel(
     var refreshing by mutableStateOf(false)
         private set
 
+    /** 下载入队事件计数（UI 监听后切换到下载页；对齐解析页行为） */
+    var downloadTriggered by mutableStateOf(0)
+        private set
+
+    /** 消费下载事件（防止再次进入网盘页重复触发切页） */
+    fun consumeDownloadTriggered() {
+        downloadTriggered = 0
+    }
+
     /** 分享创建成功后的信息（弹窗展示链接+提取码） */
     var shareResult by mutableStateOf<ShareInfo?>(null)
         private set
@@ -237,6 +246,7 @@ class QuarkCloudViewModel(
                 )
                 cloudMessage = "已加入下载：${link.filename.ifBlank { file.fname }}"
                 actionFile = null
+                downloadTriggered++
             } catch (e: Exception) {
                 cloudMessage = e.message ?: "下载失败"
             } finally {
@@ -386,6 +396,7 @@ class QuarkCloudViewModel(
                 }
                 cloudMessage = "已加入 $okCount 个下载任务"
                 exitMultiSelect()
+                // 批量下载不自动切页：保持网盘页显示处理中弹窗（单文件下载才切到下载页）
             } catch (e: Exception) {
                 cloudMessage = e.message ?: "批量下载失败"
             } finally {

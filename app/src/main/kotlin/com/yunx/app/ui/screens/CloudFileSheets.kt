@@ -653,19 +653,21 @@ private fun expireLabel(type: Int): String = when (type) {
 }
 
 /** 批量操作步骤类型 */
-private enum class BatchStep { MENU, SHARE, MOVE, DELETE }
+internal enum class BatchStep { MENU, SHARE, MOVE, DELETE }
 
 /**
  * 批量操作弹窗（长按多选后）：下载 / 分享 / 移动 / 删除。
  * 分享/移动/删除复用与单文件一致的表单与独立目录浏览。
+ * @param initialStep 初始步骤（底部栏点击下载/删除直接执行，分享/移动传入对应步骤）
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BatchActionSheet(
+internal fun BatchActionSheet(
     viewModel: QuarkCloudViewModel,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    initialStep: BatchStep = BatchStep.MENU
 ) {
-    var step by remember { mutableStateOf(BatchStep.MENU) }
+    var step by remember { mutableStateOf(initialStep) }
     val moveState by viewModel.moveUiState.collectAsState()
     val operating = viewModel.isOperating
     val count = viewModel.selected.size
@@ -912,6 +914,10 @@ private fun BatchMoveStep(
     onBack: () -> Unit,
     onDone: () -> Unit
 ) {
+    // 首次进入该步骤：加载移动目标根目录（否则 moveUiState 停留在 Loading 一直转圈）
+    LaunchedEffect(Unit) {
+        viewModel.openMoveRoot()
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
