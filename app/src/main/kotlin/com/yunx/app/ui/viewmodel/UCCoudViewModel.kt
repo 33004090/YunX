@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.UCApi
 import com.yunx.app.data.network.UCConstants
+import com.yunx.app.data.network.model.DownloadLink
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareInfo
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -210,6 +211,14 @@ class UCCoudViewModel(
 
     // ---------- 单文件操作 ----------
 
+    /**
+     * 取下载直链：优先走 entry=ft 高速通道（与分享解析同款 DOWNLOAD_URL，个人文件同样可用，
+     * 经 UCResolveRepository 转存后取链验证过），失败时回退个人云盘通道（cloudGetDownloadLink）保证兼容。
+     */
+    private suspend fun ucDownloadLink(fid: String, cookie: String): DownloadLink? =
+        api.getDownloadLink(fid, cookie)
+            ?: api.cloudGetDownloadLink(fid, cookie)
+
     /** 下载文件：取直链（带 Cookie+UA）→ 加入内置下载队列 */
     fun downloadFile() {
         val file = actionFile ?: return
@@ -221,7 +230,7 @@ class UCCoudViewModel(
                     cloudMessage = "请先登录 UC 网盘"
                     return@launch
                 }
-                val link = api.cloudGetDownloadLink(file.fid, cookie)
+                val link = ucDownloadLink(file.fid, cookie)
                     ?: throw IllegalStateException("获取下载链接失败")
                 downloadManager.enqueue(
                     url = link.downloadUrl,
@@ -345,7 +354,7 @@ class UCCoudViewModel(
                 var okCount = 0
                 files.forEach { file ->
                     runCatching {
-                        val link = api.cloudGetDownloadLink(file.fid, cookie) ?: return@runCatching
+                        val link = ucDownloadLink(file.fid, cookie) ?: return@runCatching
                         downloadManager.enqueue(
                             url = link.downloadUrl,
                             fileName = link.filename.ifBlank { file.fname },
