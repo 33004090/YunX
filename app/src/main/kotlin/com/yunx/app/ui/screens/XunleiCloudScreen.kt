@@ -46,6 +46,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -142,7 +143,10 @@ fun XunleiCloudScreen(
                             modifier = Modifier.padding(horizontal = 32.dp)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        TextButton(onClick = { viewModel.loadRoot() }) { Text("重试") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedButton(onClick = onExit) { Text("返回") }
+                            TextButton(onClick = { viewModel.loadRoot() }) { Text("重试") }
+                        }
                     }
                 }
 

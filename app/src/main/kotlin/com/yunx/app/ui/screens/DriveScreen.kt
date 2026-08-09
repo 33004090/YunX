@@ -1,11 +1,14 @@
 package com.yunx.app.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -471,10 +474,19 @@ private fun DriveAccountCardContent(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            // 已登录且有空间数据：卡片内展示剩余空间进度条
-            if (account.isLoggedIn && quota != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                QuotaInlineBar(quota)
+            // 已登录且有空间数据：卡片内展示剩余空间进度条（出现时淡入 + 纵向展开，避免突兀）
+            AnimatedVisibility(
+                visible = account.isLoggedIn && quota != null,
+                enter = fadeIn(tween(300)) + expandVertically(
+                    expandFrom = Alignment.Top,
+                    animationSpec = tween(300)
+                ),
+                exit = fadeOut(tween(200)) + shrinkVertically(animationSpec = tween(200))
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    quota?.let { QuotaInlineBar(it) }
+                }
             }
         }
 
