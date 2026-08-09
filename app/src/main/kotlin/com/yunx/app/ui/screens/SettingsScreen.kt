@@ -101,8 +101,8 @@ fun SettingsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
         SectionLabel("下载")

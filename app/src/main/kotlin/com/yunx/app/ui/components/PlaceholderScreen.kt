@@ -38,8 +38,8 @@ fun PlaceholderScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .verticalScroll(rememberScrollState())
             .padding(32.dp),
         contentAlignment = Alignment.Center
     ) {
