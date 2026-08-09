@@ -1,6 +1,7 @@
 package com.yunx.app.data.network
 
 import com.yunx.app.data.network.model.DownloadLink
+import com.yunx.app.data.network.model.QuotaInfo
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareInfo
 import com.yunx.app.data.network.model.ShareToken
@@ -344,6 +345,28 @@ suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withCo
     }
 
     // ---------- 云盘文件管理（UC 网盘功能） ----------
+
+    /** 网盘空间详情（/1/clouddrive/member：total_capacity / use_capacity，CLOUD_UA） */
+    suspend fun getQuota(cookie: String): QuotaInfo? = withContext(Dispatchers.IO) {
+        val url = "https://pc-api.uc.cn/1/clouddrive/member?pr=UCBrowser&fr=pc&fetch_subscribe=true&_ch=home"
+        runCatching {
+            val request = Request.Builder()
+                .url(url)
+                .header("Cookie", cookie)
+                .header("User-Agent", UCConstants.CLOUD_UA)
+                .header("Origin", "https://drive.uc.cn")
+                .header("Referer", "https://drive.uc.cn/")
+                .get()
+                .build()
+            val response = client.newCall(request).execute()
+            val body = response.use { it.body?.string() ?: return@runCatching null }
+            val data = JSONObject(body).optJSONObject("data") ?: return@runCatching null
+            QuotaInfo(
+                used = data.optLong("use_capacity"),
+                total = data.optLong("total_capacity")
+            )
+        }.getOrNull()
+    }
 
     /** 云盘下载直链（抓包：个人云盘文件用 ?pr=UCBrowser&fr=pc&sys=win32&ve=1.6.1，非 entry=ft 分享通道） */
     suspend fun cloudGetDownloadLink(fid: String, cookie: String): DownloadLink? = withContext(Dispatchers.IO) {

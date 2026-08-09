@@ -1,6 +1,7 @@
 package com.yunx.app.data.network
 
 import com.yunx.app.data.network.model.DownloadLink
+import com.yunx.app.data.network.model.QuotaInfo
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareInfo
 import com.yunx.app.data.network.model.ShareToken
@@ -317,6 +318,22 @@ class QuarkApi(
         }
         null
     }
+    // ---------- 网盘空间详情 ----------
+
+    /** 网盘空间详情（/1/clouddrive/member：total_capacity / use_capacity） */
+    suspend fun getQuota(cookie: String): QuotaInfo? = withContext(Dispatchers.IO) {
+        val url = "https://drive-pc.quark.cn/1/clouddrive/member?pr=ucpro&fr=pc&fetch_subscribe=true&_ch=home"
+        runCatching {
+            val response = client.newCall(get(url, cookie)).execute()
+            val body = response.use { it.body?.string() ?: return@runCatching null }
+            val data = JSONObject(body).optJSONObject("data") ?: return@runCatching null
+            QuotaInfo(
+                used = data.optLong("use_capacity"),
+                total = data.optLong("total_capacity")
+            )
+        }.getOrNull()
+    }
+
     // ---------- 下载直链 ----------
 
     /** 6.1 获取下载直链 */

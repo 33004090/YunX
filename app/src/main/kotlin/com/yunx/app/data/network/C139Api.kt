@@ -2,6 +2,7 @@ package com.yunx.app.data.network
 
 import android.util.Base64
 import com.yunx.app.data.network.model.DownloadLink
+import com.yunx.app.data.network.model.QuotaInfo
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareInfo
 import kotlinx.coroutines.Dispatchers
@@ -495,6 +496,33 @@ class C139Api(
                 else -> 1
             }
         )
+    }
+
+    // ---------- 网盘空间详情 ----------
+
+    /** 网盘空间详情（POST user-njs.yun.139.com/user/disk/quota/detail：diskSize/freeDiskSize，单位 MB；需 Cookie+mcloud-skey） */
+    suspend fun getQuota(cookie: String): QuotaInfo? = withContext(Dispatchers.IO) {
+        val authorization = C139Constants.extractAuthorization(cookie)
+            ?: return@withContext null
+        val account = accountFromAuthorization(authorization) ?: return@withContext null
+        runCatching {
+            val req = JSONObject()
+                .put("userDomainId", "")
+                .put("commonAccountInfo", JSONObject().put("account", account).put("accountType", 1))
+            val resp = cloudPost(
+                "https://user-njs.yun.139.com/user/disk/quota/detail",
+                req.toString(), authorization, cookie, needSkey = true
+            )
+            checkCloud(resp, "获取空间详情失败")
+            val data = resp.optJSONObject("data") ?: return@runCatching null
+            val total = data.optLong("diskSize") * 1024L * 1024L
+            val used = data.optLong("freeDiskSize").let { free ->
+                // quotaList[0] = 个人云（我的文件）已用（MB）
+                data.optJSONArray("quotaList")?.optJSONObject(0)?.optLong("usedSize")?.times(1024L * 1024L)
+                    ?: (total - free * 1024L * 1024L)
+            }
+            QuotaInfo(used = used, total = total)
+        }.getOrNull()
     }
 
     // ---------- 转存（分享导入，share host AES 加密） ----------

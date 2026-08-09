@@ -1,5 +1,6 @@
 package com.yunx.app.data.network
 
+import com.yunx.app.data.network.model.QuotaInfo
 import com.yunx.app.data.network.model.ShareFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -503,6 +504,32 @@ suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String):
             pwd = pwd,
             shareId = json.optString("shareid")
         )
+    }
+
+    // ---------- 网盘空间详情 ----------
+
+    /** 网盘空间详情（GET yun.baidu.com/api/quota：total / used） */
+    suspend fun getQuota(cookie: String): QuotaInfo? = withContext(Dispatchers.IO) {
+        val url = "https://yun.baidu.com/api/quota?clienttype=0&app_id=${BaiduConstants.APP_ID}" +
+            "&web=1&channel=chunlei&version=${System.currentTimeMillis()}"
+        runCatching {
+            val request = Request.Builder()
+                .url(url)
+                .header("Cookie", cookie)
+                .header("User-Agent", BaiduConstants.UA_NETDISK)
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Referer", "https://yun.baidu.com/disk/main")
+                .get()
+                .build()
+            val response = client.newCall(request).execute()
+            val body = response.use { it.body?.string() ?: return@runCatching null }
+            val json = JSONObject(body)
+            if (json.optInt("errno") != 0) return@runCatching null
+            QuotaInfo(
+                used = json.optLong("used"),
+                total = json.optLong("total")
+            )
+        }.getOrNull()
     }
 
     // ---------- 公共 ----------

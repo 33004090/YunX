@@ -1,6 +1,7 @@
 package com.yunx.app.data.network
 
 import com.yunx.app.data.network.model.DownloadLink
+import com.yunx.app.data.network.model.QuotaInfo
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareInfo
 import kotlinx.coroutines.Dispatchers
@@ -526,6 +527,26 @@ class XunleiApi(
     }
 
     // ---------- 云盘文件管理（迅雷网盘功能） ----------
+
+    /** 网盘空间详情（GET /drive/v1/about：quota.limit / usage） */
+    suspend fun getQuota(
+        accessToken: String,
+        deviceId: String,
+        captchaToken: String
+    ): QuotaInfo? = withContext(Dispatchers.IO) {
+        runCatching {
+            panCall(captchaToken, deviceId, "GET:/drive/v1/about", { t ->
+                panRequest("${XunleiConstants.PAN_BASE}/drive/v1/about", accessToken, deviceId, t)
+            }) { data ->
+                val quota = data.optJSONObject("quota")
+                QuotaInfo(
+                    used = quota?.optLong("usage") ?: 0L,
+                    total = quota?.optLong("limit") ?: 0L,
+                    usedInTrash = quota?.optLong("usage_in_trash") ?: 0L
+                )
+            }
+        }.getOrNull()
+    }
 
     /** 重命名（PATCH /drive/v1/files/{id}，body {"name"}） */
     suspend fun renameFile(

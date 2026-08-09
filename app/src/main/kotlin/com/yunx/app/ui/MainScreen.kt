@@ -79,6 +79,7 @@ import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
 import com.yunx.app.ui.viewmodel.C139AccountViewModel
 import com.yunx.app.ui.viewmodel.C139CloudViewModel
 import com.yunx.app.ui.viewmodel.DownloadViewModel
+import com.yunx.app.ui.viewmodel.DriveQuotaViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
@@ -228,6 +229,19 @@ fun MainScreen() {
             c139Api,
             { c139Repository.getAccount()?.cookie },
             downloadManager
+        )
+    )
+    // 网盘空间详情：网盘页顶部「空间总览」展示 5 平台容量使用
+    val driveQuotaViewModel: DriveQuotaViewModel = viewModel(
+        factory = DriveQuotaViewModel.Factory(
+            api, { repository.getAccount()?.cookie },
+            ucApi, { ucRepository.getAccount()?.cookie },
+            xunleiApi,
+            { xunleiRepository.getAccount()?.accessToken },
+            { xunleiRepository.getAccount()?.deviceId },
+            { xunleiRepository.getAccount()?.captchaToken },
+            baiduApi, { baiduRepository.getAccount()?.cookie },
+            c139Api, { c139Repository.getAccount()?.cookie }
         )
     )
     val xunleiResolveRepository = remember {
@@ -433,6 +447,7 @@ fun MainScreen() {
                             xunleiCloudViewModel = xunleiCloudViewModel,
                             baiduCloudViewModel = baiduCloudViewModel,
                             c139CloudViewModel = c139CloudViewModel,
+                            driveQuotaViewModel = driveQuotaViewModel,
                             onQuarkLogin = { showQuarkLogin = true },
                             onQuarkLogout = { viewModel.logout() },
                             onDownloadStarted = { currentTab = MainTab.Download },

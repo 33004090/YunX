@@ -30,11 +30,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,8 +53,10 @@ import com.yunx.app.data.db.C139AccountEntity
 import com.yunx.app.data.db.QuarkAccountEntity
 import com.yunx.app.data.db.UCAccountEntity
 import com.yunx.app.data.db.XunleiAccountEntity
+import com.yunx.app.data.network.model.QuotaInfo
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
 import com.yunx.app.ui.viewmodel.C139CloudViewModel
+import com.yunx.app.ui.viewmodel.DriveQuotaViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.UCCoudViewModel
 import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
@@ -92,6 +97,8 @@ fun DriveScreen(
     baiduCloudViewModel: BaiduCloudViewModel,
     /** 139 网盘云盘浏览 ViewModel */
     c139CloudViewModel: C139CloudViewModel,
+    /** 网盘空间详情 ViewModel（顶部空间总览） */
+    driveQuotaViewModel: DriveQuotaViewModel,
     onQuarkLogin: () -> Unit,
     onQuarkLogout: () -> Unit,
     /** 夸克云盘下载入队后切换到「下载」Tab */
@@ -162,6 +169,11 @@ fun DriveScreen(
         emptyList<DriveAccount>()
     }
 
+    // 进入网盘页加载空间详情（仅已登录平台）
+    LaunchedEffect(Unit) {
+        driveQuotaViewModel.loadAll()
+    }
+
     // 账号列表 ↔ 夸克云盘 ↔ UC 云盘 ↔ 迅雷云盘：平滑过渡（淡入 + 轻微缩放，不僵硬）
     AnimatedContent(
         targetState = when {
@@ -216,92 +228,97 @@ fun DriveScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-        item {
-            Text(
-                text = "登录后即可自动携带凭证解析与下载",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-        }
-        item(key = quark.id) {
-            DriveAccountCard(
-                account = quark,
-                onClick = if (quark.isLoggedIn) {
-                    { showCloud = true }
-                } else {
-                    onQuarkLogin
-                },
-                onMoreClick = if (quark.isLoggedIn) {
-                    { showQuarkSheet = true }
-                } else {
-                    null
+                item {
+                    Text(
+                        text = "登录后即可自动携带凭证解析与下载",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
                 }
-            )
-        }
-        item(key = uc.id) {
-            DriveAccountCard(
-                account = uc,
-                onClick = if (uc.isLoggedIn) {
-                    { showUCCloud = true }
-                } else {
-                    onUCLogin
-                },
-                onMoreClick = if (uc.isLoggedIn) {
-                    { showUCSheet = true }
-                } else {
-                    null
+                item(key = quark.id) {
+                    DriveAccountCard(
+                        account = quark,
+                        quota = driveQuotaViewModel.quarkQuota.collectAsState().value,
+                        onClick = if (quark.isLoggedIn) {
+                            { showCloud = true }
+                        } else {
+                            onQuarkLogin
+                        },
+                        onMoreClick = if (quark.isLoggedIn) {
+                            { showQuarkSheet = true }
+                        } else {
+                            null
+                        }
+                    )
                 }
-            )
-        }
-        item(key = xunlei.id) {
-            DriveAccountCard(
-                account = xunlei,
-                onClick = if (xunlei.isLoggedIn) {
-                    { showXunleiCloud = true }
-                } else {
-                    onXunleiLogin
-                },
-                onMoreClick = if (xunlei.isLoggedIn) {
-                    { showXunleiSheet = true }
-                } else {
-                    null
+                item(key = uc.id) {
+                    DriveAccountCard(
+                        account = uc,
+                        quota = driveQuotaViewModel.ucQuota.collectAsState().value,
+                        onClick = if (uc.isLoggedIn) {
+                            { showUCCloud = true }
+                        } else {
+                            onUCLogin
+                        },
+                        onMoreClick = if (uc.isLoggedIn) {
+                            { showUCSheet = true }
+                        } else {
+                            null
+                        }
+                    )
                 }
-            )
-        }
-        item(key = baidu.id) {
-        DriveAccountCard(
-            account = baidu,
-            onClick = if (baidu.isLoggedIn) {
-                { showBaiduCloud = true }
-            } else {
-                onBaiduLogin
-            },
-            onMoreClick = if (baidu.isLoggedIn) {
-                { showBaiduSheet = true }
-            } else {
-                    null
+                item(key = xunlei.id) {
+                    DriveAccountCard(
+                        account = xunlei,
+                        quota = driveQuotaViewModel.xunleiQuota.collectAsState().value,
+                        onClick = if (xunlei.isLoggedIn) {
+                            { showXunleiCloud = true }
+                        } else {
+                            onXunleiLogin
+                        },
+                        onMoreClick = if (xunlei.isLoggedIn) {
+                            { showXunleiSheet = true }
+                        } else {
+                            null
+                        }
+                    )
                 }
-            )
-        }
-        item(key = c139.id) {
-        DriveAccountCard(
-            account = c139,
-            onClick = if (c139.isLoggedIn) {
-                { showC139Cloud = true }
-            } else {
-                onC139Login
-            },
-            onMoreClick = if (c139.isLoggedIn) {
-                { showC139Sheet = true }
-            } else {
-                null
-            }
-            )
-        }
-        items(others, key = { it.id }) { account ->
-            DriveAccountCard(account = account)
-        }
+                item(key = baidu.id) {
+                    DriveAccountCard(
+                        account = baidu,
+                        quota = driveQuotaViewModel.baiduQuota.collectAsState().value,
+                        onClick = if (baidu.isLoggedIn) {
+                            { showBaiduCloud = true }
+                        } else {
+                            onBaiduLogin
+                        },
+                        onMoreClick = if (baidu.isLoggedIn) {
+                            { showBaiduSheet = true }
+                        } else {
+                            null
+                        }
+                    )
+                }
+                item(key = c139.id) {
+                    DriveAccountCard(
+                        account = c139,
+                        quota = driveQuotaViewModel.c139Quota.collectAsState().value,
+                        onClick = if (c139.isLoggedIn) {
+                            { showC139Cloud = true }
+                        } else {
+                            onC139Login
+                        },
+                        onMoreClick = if (c139.isLoggedIn) {
+                            { showC139Sheet = true }
+                        } else {
+                            null
+                        }
+                    )
+                }
+                items(others, key = { it.id }) { account ->
+                    DriveAccountCard(account = account)
+                }
             }
         }
     }
@@ -370,6 +387,8 @@ fun DriveScreen(
 @Composable
 private fun DriveAccountCard(
     account: DriveAccount,
+    /** 网盘空间详情（已登录且有数据时在卡片内显示进度条）；null 不显示 */
+    quota: QuotaInfo? = null,
     onClick: (() -> Unit)? = null,
     /** 已登录时右侧「三个点」更多按钮（打开账号弹窗）；null 则不显示 */
     onMoreClick: (() -> Unit)? = null
@@ -381,6 +400,7 @@ private fun DriveAccountCard(
     val content: @Composable () -> Unit = {
         DriveAccountCardContent(
             account = account,
+            quota = quota,
             clickable = onClick != null,
             onMoreClick = onMoreClick
         )
@@ -405,6 +425,7 @@ private fun DriveAccountCard(
 @Composable
 private fun DriveAccountCardContent(
     account: DriveAccount,
+    quota: QuotaInfo? = null,
     clickable: Boolean,
     onMoreClick: (() -> Unit)? = null
 ) {
@@ -450,6 +471,11 @@ private fun DriveAccountCardContent(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // 已登录且有空间数据：卡片内展示剩余空间进度条
+            if (account.isLoggedIn && quota != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                QuotaInlineBar(quota)
+            }
         }
 
         when {
@@ -468,6 +494,32 @@ private fun DriveAccountCardContent(
             )
             else -> LoginBadge(isLoggedIn = false)
         }
+    }
+}
+
+/** 网盘卡片内空间进度条：已用 / 总容量 + 细进度条 */
+@Composable
+private fun QuotaInlineBar(quota: QuotaInfo) {
+    val ratio = if (quota.total > 0) {
+        (quota.used.toFloat() / quota.total.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    Column {
+        Text(
+            text = "已用 ${formatBytes(quota.used)} / ${formatBytes(quota.total)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        LinearProgressIndicator(
+            progress = { ratio },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
     }
 }
 
@@ -491,4 +543,18 @@ private fun LoginBadge(isLoggedIn: Boolean) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+}
+
+/** 字节数格式化：B / KB / MB / GB / TB */
+private fun formatBytes(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val units = arrayOf("B", "KB", "MB", "GB", "TB")
+    var value = bytes.toDouble()
+    var unit = 0
+    while (value >= 1024 && unit < units.size - 1) {
+        value /= 1024
+        unit++
+    }
+    return if (unit == 0) "${bytes} B"
+    else String.format("%.1f %s", value, units[unit])
 }

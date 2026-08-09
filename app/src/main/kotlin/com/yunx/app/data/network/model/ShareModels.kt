@@ -43,6 +43,15 @@ data class ShareInfo(
 )
 
 /**
+ * 网盘空间详情（总容量 / 已用，单位字节）。
+ */
+data class QuotaInfo(
+    val used: Long,
+    val total: Long,
+    val usedInTrash: Long = 0L
+)
+
+/**
  * 下载直链。
  * @param cleanupDirFid 下载完成后需删除的临时转存子目录 fid（根治夸克去重返回已删 fid）；null 表示无需清理
  */
