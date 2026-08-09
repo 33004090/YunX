@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -51,8 +52,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 可选的下载线程数 */
-private val threadOptions = listOf(1, 2, 4, 8, 16, 32)
+/** 可选的下载线程数（最高 512） */
+private val threadOptions = listOf(1, 2, 4, 8, 16, 32, 64, 128, 256, 512)
 
 /**
  * 设置页：下载线程数设置 + 崩溃测试入口。
@@ -266,26 +267,34 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    threadOptions.forEach { value ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = threads == value,
-                                onClick = {
-                                    threads = value
-                                    onThreadsChange(value)
-                                    showThreadsDialog = false
-                                }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "$value 线程",
-                                style = MaterialTheme.typography.bodyLarge
-                            )
+                    // 选项较多（最高 512）：限高 + 可滚动，避免横屏/矮屏时选项被压缩挤成一团
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        threadOptions.forEach { value ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = threads == value,
+                                    onClick = {
+                                        threads = value
+                                        onThreadsChange(value)
+                                        showThreadsDialog = false
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "$value 线程",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
                         }
                     }
                 }

@@ -173,14 +173,14 @@ fun MainScreen() {
     // 这里提升到与设置页线程数上限（32）对齐，并放宽超时避免弱网误判失败
     val downloadClient = remember {
         val dispatcher = Dispatcher().apply {
-            maxRequests = 64
-            maxRequestsPerHost = 32   // 解除默认 5 路并发封顶
+            maxRequests = 512
+            maxRequestsPerHost = 512   // 与设置页线程数上限（512）对齐，不锁死并发
         }
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .connectionPool(
                 ConnectionPool(
-                    maxIdleConnections = 32,          // 与最大线程数对齐，连接可复用
+                    maxIdleConnections = 64,          // 空闲连接保持上限（活跃并发由 Dispatcher 控制）
                     keepAliveDuration = 5,
                     timeUnit = TimeUnit.MINUTES
                 )
