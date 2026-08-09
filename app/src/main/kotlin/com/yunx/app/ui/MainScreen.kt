@@ -88,7 +88,10 @@ import com.yunx.app.ui.viewmodel.UCAccountViewModel
 import com.yunx.app.ui.viewmodel.XunleiAccountViewModel
 import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
 import kotlinx.coroutines.launch
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 /**
  * 主页框架：
@@ -166,11 +169,33 @@ fun MainScreen() {
         )
     }
     // 下载管理器：OkHttp 分片下载器 + Room 任务持久化 + 可配置线程数（设置页动态生效）
+    // 专用调优 OkHttpClient：默认实例 maxRequestsPerHost=5 会锁死分片并发（所有分片打同一 CDN host），
+    // 这里提升到与设置页线程数上限（32）对齐，并放宽超时避免弱网误判失败
+    val downloadClient = remember {
+        val dispatcher = Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 32   // 解除默认 5 路并发封顶
+        }
+        OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .connectionPool(
+                ConnectionPool(
+                    maxIdleConnections = 32,          // 与最大线程数对齐，连接可复用
+                    keepAliveDuration = 5,
+                    timeUnit = TimeUnit.MINUTES
+                )
+            )
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)        // 从默认 10s 放宽，链路抖动不误判失败
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
     val downloadManager = remember {
         DownloadManager(
             context = context,
             dao = db.downloadTaskDao(),
-            downloader = ChunkDownloader(OkHttpClient()),
+            downloader = ChunkDownloader(downloadClient),
             threadProvider = settings::downloadThreads
         )
     }

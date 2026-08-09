@@ -240,13 +240,13 @@ class DownloadManager(
         // 取到大小后再次检查取消（暂停可能发生在 getTotalSize 期间）
         if (!isTaskActive()) return
 
-        val chunkCount = chunkCountFor(total)
+        val threadCount = threadProvider().coerceAtLeast(1)
+        val chunkCount = chunkCountFor(total, threadCount)
         val chunkSize = ceil(total.toDouble() / chunkCount).toLong()
         val chunkDir = chunkDirOf(id).apply { mkdirs() }
-        Log.d(TAG, "分片规划: id=$id chunks=$chunkCount size=$chunkSize threads=${threadProvider().coerceAtLeast(1)}")
+        Log.d(TAG, "分片规划: id=$id chunks=$chunkCount size=$chunkSize threads=$threadCount")
 
         // 注册实时统计：线程数 = 用户设置的线程数（非分片数）
-        val threadCount = threadProvider().coerceAtLeast(1)
         _stats.update { it + (id to DownloadStats(0L, -1L, threadCount)) }
 
         // 统计已有 part 大小（断点续传起点）
@@ -422,11 +422,18 @@ class DownloadManager(
     private fun chunkDirOf(id: Long): File =
         File(context.filesDir, "download_tmp/$id")
 
-    private fun chunkCountFor(total: Long): Int = when {
-        total <= 0 -> 1
-        total < 5 * 1024 * 1024 -> 1          // < 5MB
-        total < 50 * 1024 * 1024 -> 4         // < 50MB
-        total < 500 * 1024 * 1024 -> 8        // < 500MB
-        else -> 16                            // ≥ 500MB，配合高线程数
+    /** 分片数规划：分片数 ≥ 并发线程数（避免线程饿死），且单分片不小于 1MB，封顶 64 */
+    private fun chunkCountFor(total: Long, threads: Int): Int {
+        if (total <= 0) return 1
+        val minChunkBytes = 1 * 1024 * 1024L
+        val bySize = when {
+            total < 5 * 1024 * 1024 -> 1          // < 5MB
+            total < 50 * 1024 * 1024 -> 4         // < 50MB
+            total < 500 * 1024 * 1024 -> 8        // < 500MB
+            else -> 16                            // ≥ 500MB 基础值
+        }
+        // 分片数至少喂饱所有并发线程，但不超过 total/minChunkBytes 与 64 封顶
+        val want = maxOf(bySize, threads)
+        return minOf(want, (total / minChunkBytes).toInt().coerceAtLeast(1), 64)
     }
 }
