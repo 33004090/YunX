@@ -8,6 +8,10 @@ object UCConstants {
 
     /** UC 网盘客户端 User-Agent */
     const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    /** 官方 Web 客户端页面（Referer/Origin 基准域名；UC OSS 直链按 Referer 档位限速） */
+    const val WEB_ORIGIN = "https://drive.uc.cn"
+    /** 下载 OSS 直链必须携带的 Referer（缺它被 Callback 限速 ~100KB/s） */
+    const val DOWNLOAD_REFERER = "$WEB_ORIGIN/"
     /** WebView 登录页 */
     const val LOGIN_URL = "https://drive.uc.cn/"
 

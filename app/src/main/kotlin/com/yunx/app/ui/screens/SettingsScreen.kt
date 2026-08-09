@@ -267,33 +267,33 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    // 选项较多（最高 512）：限高 + 可滚动，避免横屏/矮屏时选项被压缩挤成一团
+                    // 两列网格：10 个选项 5 行一屏可见，无需滑动就知道有哪些档位；
+                    // 仍保留限高 + 滚动，横屏/矮屏时兜底
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 320.dp)
                             .verticalScroll(rememberScrollState())
                     ) {
-                        threadOptions.forEach { value ->
+                        threadOptions.chunked(2).forEach { rowValues ->
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 2.dp),
+                                modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                RadioButton(
-                                    selected = threads == value,
-                                    onClick = {
-                                        threads = value
-                                        onThreadsChange(value)
-                                        showThreadsDialog = false
-                                    }
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "$value 线程",
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
+                                rowValues.forEach { value ->
+                                    RadioThreadRow(
+                                        value = value,
+                                        threads = threads,
+                                        onSelect = { v ->
+                                            threads = v
+                                            onThreadsChange(v)
+                                            showThreadsDialog = false
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                // 奇数个时补空占位，保持两列对齐
+                                if (rowValues.size == 1) Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
@@ -362,5 +362,31 @@ private fun SettingsItem(
                 tint = MaterialTheme.colorScheme.outline
             )
         }
+    }
+}
+
+/** 线程数单选行（用于弹窗两列布局，每行占半宽） */
+@Composable
+private fun RadioThreadRow(
+    value: Int,
+    threads: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(
+            selected = threads == value,
+            onClick = { onSelect(value) }
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "$value 线程",
+            style = MaterialTheme.typography.bodyLarge
+        )
     }
 }

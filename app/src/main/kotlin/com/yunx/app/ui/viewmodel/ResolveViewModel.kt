@@ -519,8 +519,8 @@ class ResolveViewModel(
                 isUC -> mapOf(
                     "Cookie" to credential,
                     "User-Agent" to UCConstants.USER_AGENT,
-                    "Referer" to "https://drive.uc.cn/",
-                    "Origin" to "https://drive.uc.cn"
+                    "Referer" to UCConstants.DOWNLOAD_REFERER,
+                    "Origin" to UCConstants.WEB_ORIGIN
                 )
                 else -> mapOf(
                     "Cookie" to credential,

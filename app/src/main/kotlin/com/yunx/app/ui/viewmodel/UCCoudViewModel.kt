@@ -231,8 +231,8 @@ class UCCoudViewModel(
                         "Cookie" to cookie,
                         // UC OSS 直链：必须带官方 Referer（否则被 Callback 限速 ~100KB/s）+ Origin，与解析页 UC 分支一致
                         "User-Agent" to UCConstants.USER_AGENT,
-                        "Referer" to "https://drive.uc.cn/",
-                        "Origin" to "https://drive.uc.cn"
+                        "Referer" to UCConstants.DOWNLOAD_REFERER,
+                        "Origin" to UCConstants.WEB_ORIGIN
                     )
                 )
                 cloudMessage = "已加入下载：${link.filename.ifBlank { file.fname }}"
@@ -354,8 +354,8 @@ class UCCoudViewModel(
                                 "Cookie" to cookie,
                                 // UC OSS 直链：必须带官方 Referer（否则被 Callback 限速 ~100KB/s）+ Origin，与解析页 UC 分支一致
                                 "User-Agent" to UCConstants.USER_AGENT,
-                                "Referer" to "https://drive.uc.cn/",
-                                "Origin" to "https://drive.uc.cn"
+                                "Referer" to UCConstants.DOWNLOAD_REFERER,
+                                "Origin" to UCConstants.WEB_ORIGIN
                             )
                         )
                         okCount++
