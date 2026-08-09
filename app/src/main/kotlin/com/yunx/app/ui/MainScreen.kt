@@ -458,7 +458,8 @@ fun MainScreen() {
                             quarkCloudViewModel,
                             xunleiCloudViewModel,
                             baiduCloudViewModel,
-                            c139CloudViewModel
+                            c139CloudViewModel,
+                            ucCloudViewModel
                         )
                         MainTab.Drive -> DriveScreen(
                             scrollBehavior = scrollBehavior,

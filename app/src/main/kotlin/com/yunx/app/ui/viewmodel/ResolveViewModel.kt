@@ -83,9 +83,10 @@ class ResolveViewModel(
     var saveMessage by mutableStateOf<String?>(null)
         private set
 
-    /** 当前分享是否支持转存（夸克 / 迅雷 / 百度 / 139） */
+    /** 当前分享是否支持转存（夸克 / UC / 迅雷 / 百度 / 139） */
     val canSave: Boolean
         get() = currentPlatform == SharePlatform.QUARK ||
+            currentPlatform == SharePlatform.UC ||
             currentPlatform == SharePlatform.XUNLEI ||
             currentPlatform == SharePlatform.BAIDU ||
             currentPlatform == SharePlatform.C139
@@ -101,6 +102,10 @@ class ResolveViewModel(
     /** 当前分享是否为 139（UI 选择 139 版转存目录选择器） */
     val isSaveC139: Boolean
         get() = currentPlatform == SharePlatform.C139
+
+    /** 当前分享是否为 UC（UI 选择 UC 版转存目录选择器） */
+    val isSaveUC: Boolean
+        get() = currentPlatform == SharePlatform.UC
 
     /** 请求转存：记录目标文件并打开目录选择弹窗 */
     fun requestSave(file: ShareFile) {
@@ -164,6 +169,21 @@ class ResolveViewModel(
                         c139ResolveRepository.transferFile(s, file, toDirFid, credential)
                             .onSuccess {
                                 saveMessage = "已保存到139网盘"
+                                saveTarget = null
+                            }
+                            .onFailure {
+                                saveMessage = it.message ?: "转存失败"
+                            }
+                    }
+                    SharePlatform.UC -> {
+                        val credential = currentCredential()
+                        if (credential.isNullOrBlank()) {
+                            saveMessage = "请先登录UC网盘"
+                            return@launch
+                        }
+                        ucResolveRepository.transferFile(s, file, toDirFid, credential)
+                            .onSuccess {
+                                saveMessage = "已保存到UC网盘"
                                 saveTarget = null
                             }
                             .onFailure {
@@ -259,6 +279,10 @@ class ResolveViewModel(
                             SharePlatform.C139 -> {
                                 // 139 批量转存到根目录（fileId "/"）
                                 c139ResolveRepository.transferFile(s, file, "/", credential)
+                            }
+                            SharePlatform.UC -> {
+                                // UC 批量转存到根目录（pdir_fid "0"）
+                                ucResolveRepository.transferFile(s, file, UCConstants.DEFAULT_PDIR_FID, credential)
                             }
                             else -> {
                                 resolveRepository.saveToCloud(s, file, QuarkConstants.DEFAULT_PDIR_FID, credential)

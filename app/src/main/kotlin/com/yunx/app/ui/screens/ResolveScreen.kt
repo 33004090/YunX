@@ -69,6 +69,7 @@ import com.yunx.app.ui.viewmodel.C139CloudViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveUiState
 import com.yunx.app.ui.viewmodel.ResolveViewModel
+import com.yunx.app.ui.viewmodel.UCCoudViewModel
 import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
 
 /**
@@ -87,6 +88,8 @@ fun ResolveScreen(
     baiduCloudViewModel: BaiduCloudViewModel,
     /** 139 网盘云盘浏览 ViewModel（139 分享转存目录选择用） */
     c139CloudViewModel: C139CloudViewModel,
+    /** UC 网盘云盘浏览 ViewModel（UC 分享转存目录选择用） */
+    ucCloudViewModel: UCCoudViewModel,
     modifier: Modifier = Modifier
 ) {
     val state = viewModel.uiState
@@ -188,6 +191,7 @@ fun ResolveScreen(
             xunleiCloudViewModel = xunleiCloudViewModel,
             baiduCloudViewModel = baiduCloudViewModel,
             c139CloudViewModel = c139CloudViewModel,
+            ucCloudViewModel = ucCloudViewModel,
             scrollBehavior = scrollBehavior,
                     // 顶部左上角返回：退出文件页回到输入页（输入框内容保留）
                     onExit = { viewModel.backToInput() },
