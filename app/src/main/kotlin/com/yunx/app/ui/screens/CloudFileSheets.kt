@@ -318,6 +318,11 @@ private fun MoveStep(
             onNavigate = { viewModel.moveNavigateToLevel(it) }
         )
         Spacer(modifier = Modifier.height(8.dp))
+        // 返回上一级：固定在目录区上方（不参与 AnimatedContent 过渡，避免与目录内容交叉叠加）
+        if ((moveState as? QuarkCloudUiState.Loaded)?.pathNames?.isNotEmpty() == true) {
+            BackToParentItem(onClick = { viewModel.moveBack() })
+            Spacer(modifier = Modifier.height(4.dp))
+        }
         // 移动目录切换：淡入过渡
         AnimatedContent(
             targetState = moveState,
@@ -340,12 +345,7 @@ private fun MoveStep(
                 ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
                 is QuarkCloudUiState.Loaded -> {
-                // 子目录：返回上一级
-                if (s.pathNames.isNotEmpty()) {
-                    BackToParentItem(onClick = { viewModel.moveBack() })
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-                val dirs = s.files.filter { it.isdir }
+                    val dirs = s.files.filter { it.isdir }
                 if (dirs.isEmpty()) {
                     Box(
                         modifier = Modifier
@@ -949,6 +949,11 @@ private fun BatchMoveStep(
             onNavigate = { viewModel.moveNavigateToLevel(it) }
         )
         Spacer(modifier = Modifier.height(8.dp))
+        // 返回上一级：固定在目录区上方（不参与 AnimatedContent 过渡，避免与目录内容交叉叠加）
+        if ((moveState as? QuarkCloudUiState.Loaded)?.pathNames?.isNotEmpty() == true) {
+            BackToParentItem(onClick = { viewModel.moveBack() })
+            Spacer(modifier = Modifier.height(4.dp))
+        }
         // 移动目录切换：淡入过渡
         AnimatedContent(
             targetState = moveState,
@@ -971,11 +976,7 @@ private fun BatchMoveStep(
                 ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
                 is QuarkCloudUiState.Loaded -> {
-                if (s.pathNames.isNotEmpty()) {
-                    BackToParentItem(onClick = { viewModel.moveBack() })
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-                val dirs = s.files.filter { it.isdir }
+                    val dirs = s.files.filter { it.isdir }
                 if (dirs.isEmpty()) {
                     Box(
                         modifier = Modifier

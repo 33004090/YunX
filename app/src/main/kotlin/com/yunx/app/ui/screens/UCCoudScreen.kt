@@ -567,6 +567,11 @@ private fun UCMoveSheet(
                 onNavigate = { viewModel.moveNavigateToLevel(it) }
             )
             Spacer(modifier = Modifier.height(8.dp))
+// 返回上一级：固定在目录区上方（不参与 AnimatedContent 过渡，避免与目录内容交叉叠加）
+            if ((moveState as? UCCloudUiState.Loaded)?.pathNames?.isNotEmpty() == true) {
+                BackToParentItem(onClick = { viewModel.moveBack() })
+                Spacer(modifier = Modifier.height(4.dp))
+            }
             // 移动目录切换：淡入过渡
             AnimatedContent(
                 targetState = moveState,
@@ -575,21 +580,17 @@ private fun UCMoveSheet(
             ) { s ->
                 when (s) {
                     is UCCloudUiState.Loading -> Box(
-                    modifier = Modifier.fillMaxWidth().height(180.dp),
-                    contentAlignment = Alignment.Center
-                ) { CircularProgressIndicator() }
+                        modifier = Modifier.fillMaxWidth().height(180.dp),
+                        contentAlignment = Alignment.Center
+                    ) { CircularProgressIndicator() }
 
-                is UCCloudUiState.Error -> Box(
-                    modifier = Modifier.fillMaxWidth().height(140.dp),
-                    contentAlignment = Alignment.Center
-                ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    is UCCloudUiState.Error -> Box(
+                        modifier = Modifier.fillMaxWidth().height(140.dp),
+                        contentAlignment = Alignment.Center
+                    ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
-                is UCCloudUiState.Loaded -> {
-                    if (s.pathNames.isNotEmpty()) {
-                        BackToParentItem(onClick = { viewModel.moveBack() })
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                    val dirs = s.files.filter { it.isdir }
+                    is UCCloudUiState.Loaded -> {
+                        val dirs = s.files.filter { it.isdir }
                     if (dirs.isEmpty()) {
                         Box(
                             modifier = Modifier.fillMaxWidth().height(90.dp),

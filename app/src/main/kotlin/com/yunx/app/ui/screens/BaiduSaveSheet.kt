@@ -1,6 +1,11 @@
 package com.yunx.app.ui.screens
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.yunx.app.ui.resolve.BackToParentItem
 import com.yunx.app.ui.resolve.CrumbBar
 import com.yunx.app.ui.resolve.ShareFileRow
 import com.yunx.app.ui.viewmodel.BaiduCloudUiState
@@ -122,8 +128,20 @@ fun BaiduSaveSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            when (val s = cloudState) {
-                is BaiduCloudUiState.Loading -> Box(
+            // 返回上一级：固定在目录区上方（与网盘移动弹窗一致）
+            if ((cloudState as? BaiduCloudUiState.Loaded)?.pathNames?.isNotEmpty() == true) {
+                BackToParentItem(onClick = { cloudViewModel.back() })
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+
+            // 目录切换：淡入过渡（与网盘移动弹窗一致）
+            AnimatedContent(
+                targetState = cloudState,
+                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
+                label = "baiduSaveState"
+            ) { s ->
+                when (s) {
+                    is BaiduCloudUiState.Loading -> Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(200.dp),
@@ -183,7 +201,8 @@ fun BaiduSaveSheet(
                             }
                         }
                     }
-                }
+            }
+            }
             }
 
             Spacer(modifier = Modifier.height(20.dp))

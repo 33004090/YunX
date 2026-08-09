@@ -557,6 +557,11 @@ private fun BaiduMoveSheet(
                 onNavigate = { viewModel.moveNavigateToLevel(it) }
             )
             Spacer(modifier = Modifier.height(8.dp))
+            // 返回上一级：固定在目录区上方（不参与 AnimatedContent 过渡，避免与目录内容交叉叠加）
+            if ((moveState as? BaiduCloudUiState.Loaded)?.pathNames?.isNotEmpty() == true) {
+                BackToParentItem(onClick = { viewModel.moveBack() })
+                Spacer(modifier = Modifier.height(4.dp))
+            }
             AnimatedContent(
                 targetState = moveState,
                 transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
@@ -574,10 +579,6 @@ private fun BaiduMoveSheet(
                     ) { Text(s.message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
                     is BaiduCloudUiState.Loaded -> {
-                        if (s.pathNames.isNotEmpty()) {
-                            BackToParentItem(onClick = { viewModel.moveBack() })
-                            Spacer(modifier = Modifier.height(4.dp))
-                        }
                         val dirs = s.files.filter { it.isdir }
                         if (dirs.isEmpty()) {
                             Box(
