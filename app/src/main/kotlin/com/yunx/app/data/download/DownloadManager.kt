@@ -66,6 +66,20 @@ class DownloadManager(
     /** 前台服务计数：有任务在下载时保持前台（避免切后台限速/进程被杀） */
     private val activeTaskCount = java.util.concurrent.atomic.AtomicInteger(0)
 
+    /** 前台通知进度节流（毫秒）：2 秒更新一次，避免频繁刷新系统通知 */
+    private val notifyThrottleMs = 2000L
+    private val lastNotifyTs = AtomicLong(0)
+
+    /** 更新前台通知进度（2 秒节流；total<=0 时不确定进度，只更新标题） */
+    private fun notifyProgress(fileName: String, new: Long, total: Long) {
+        val now = System.currentTimeMillis()
+        if (now - lastNotifyTs.get() >= notifyThrottleMs) {
+            lastNotifyTs.set(now)
+            val percent = if (total > 0) ((new * 100 / total).toInt().coerceIn(0, 100)) else -1
+            DownloadService.update(context, fileName, percent)
+        }
+    }
+
     /** 每个任务一把互斥锁：暂停后立即恢复时避免新旧协程并发写分片 */
     private val taskLocks = ConcurrentHashMap<Long, Mutex>()
 
@@ -310,6 +324,8 @@ class DownloadManager(
                                     val remain = if (speed > 0) (total - new) * 1000 / speed else -1L
                                     _stats.update { it + (id to DownloadStats(speed, remain, threadCount)) }
                                 }
+                                // 前台通知进度（2 秒节流）
+                                notifyProgress(task.fileName, new, total)
                                 val last = lastUpdate.get()
                                 if (new - last >= progressThrottle || new >= total) {
                                     if (lastUpdate.compareAndSet(last, new)) {
@@ -345,6 +361,8 @@ class DownloadManager(
                 val new = fullDownloaded.addAndGet(bytes)
                 if (!isTaskActive()) return@downloadFull
                 dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
+                // 前台通知进度（2 秒节流）
+                notifyProgress(task.fileName, new, total)
             }
             if (fullOk) {
                 finishDownload(id, chunkDir, listOf(fullPart), task.fileName)
@@ -377,6 +395,8 @@ class DownloadManager(
             if (!isTaskActive()) return@downloadChunk
             // 大小未知：只更新已下载量（total=0 表示未知）
             dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, 0)
+            // 前台通知进度（2 秒节流，total 未知时仅更新标题）
+            notifyProgress(task.fileName, new, 0)
         }
         if (!ok) {
             // Range 被 CDN 拒绝（416/403 等）：回退为无 Range 完整 GET

@@ -230,7 +230,15 @@ fun MainScreen() {
             downloadManager
         )
     )
-    // 迅雷网盘云盘浏览：点击已登录的迅雷卡片打开（access_token/设备指纹/captcha 从数据库读取）
+    // 迅雷 access_token 过期（401 unauthenticated）自动刷新：refresh_token 换新并持久化（对齐官方 /v1/auth/token 抓包）
+    xunleiApi.refreshTokenProvider = { deviceId ->
+        val acc = xunleiRepository.getAccount()
+        if (acc == null || acc.refreshToken.isBlank()) null
+        else xunleiApi.refreshToken(acc.refreshToken, deviceId)?.also { (at, nrt) ->
+            xunleiRepository.updateTokens(at, nrt)
+        }
+    }
+    // 迅雷云盘浏览：点击已登录的迅雷卡片打开（access_token/设备指纹/captcha 从数据库读取）
     val xunleiCloudViewModel: XunleiCloudViewModel = viewModel(
         factory = XunleiCloudViewModel.Factory(
             xunleiApi,

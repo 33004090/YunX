@@ -53,6 +53,13 @@ class XunleiApi(
     @Volatile
     private var refreshedCaptcha: String? = null
 
+    /** 当前有效 access_token（401 自动刷新后更新；pan 请求优先使用，避免刷新后闭包仍用旧值） */
+    @Volatile
+    private var currentAccessToken: String = ""
+
+    /** 401/unauthenticated 时自动刷新：提供 refresh_token 换新 token（由调用方注入并持久化） */
+    var refreshTokenProvider: suspend (deviceId: String) -> Pair<String, String>? = { null }
+
     /** 当前用户 ID（从 access_token JWT 解析，captcha init 的 meta 需要） */
     @Volatile
     private var currentUserId: String = ""
@@ -216,6 +223,7 @@ class XunleiApi(
                 if (at.isBlank()) null else {
                     // 缓存 user_id（JWT sub），captcha/init 的 meta 需要
                     jwtSub(at).takeIf { it.isNotBlank() }?.let { currentUserId = it }
+                    currentAccessToken = at
                     at to rt
                 }
             }
@@ -251,6 +259,7 @@ class XunleiApi(
                     val rt = json.optString("refresh_token").ifBlank { json.optString("refreshToken") }
                     if (at.isBlank()) null else {
                         jwtSub(at).takeIf { it.isNotBlank() }?.let { currentUserId = it }
+                        currentAccessToken = at
                         at to rt
                     }
                 }
@@ -677,7 +686,7 @@ class XunleiApi(
         val builder = Request.Builder()
             .url(url)
             .header("User-Agent", XunleiConstants.WEB_UA)
-            .header("Authorization", "Bearer $accessToken")
+            .header("Authorization", "Bearer ${currentAccessToken.ifBlank { accessToken }}")
             .header("X-Device-Id", deviceId)
             .header("X-Client-Version", "8.31.0.9726")
             .header("Content-Type", "application/json")
@@ -700,7 +709,7 @@ class XunleiApi(
         val builder = Request.Builder()
             .url(url)
             .header("User-Agent", XunleiConstants.WEB_UA)
-            .header("Authorization", "Bearer $accessToken")
+            .header("Authorization", "Bearer ${currentAccessToken.ifBlank { accessToken }}")
             .header("X-Device-Id", deviceId)
             .header("X-Client-Version", "8.31.0.9726")
             .header("Content-Type", "application/json")
@@ -732,6 +741,19 @@ class XunleiApi(
             }
             if (!response.isSuccessful || json.has("error")) {
                 val err = json.optString("error")
+                // access_token 过期（401/unauthenticated）：refresh_token 换新 → 重新 init captcha → 重试（对齐官方抓包）
+                if ((response.code == 401 || err == "unauthenticated") && attempt == 0) {
+                    val refreshed = refreshTokenProvider(deviceId)
+                    if (refreshed != null) {
+                        currentAccessToken = refreshed.first
+                        val newCaptcha = initPanCaptcha(deviceId, action, token)
+                        if (!newCaptcha.isNullOrBlank()) {
+                            refreshedCaptcha = newCaptcha
+                            token = newCaptcha
+                        }
+                        return@repeat
+                    }
+                }
                 if (err == "captcha_invalid" && attempt == 0) {
                     // 用正确 action + captcha_sign 重新 init（携带旧 token），拿 723 长度有效 token 后重试
                     val newToken = initPanCaptcha(deviceId, action, token)
