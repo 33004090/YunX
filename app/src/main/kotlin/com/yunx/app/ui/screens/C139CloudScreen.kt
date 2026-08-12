@@ -1,6 +1,7 @@
 package com.yunx.app.ui.screens
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -93,6 +94,8 @@ fun C139CloudScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
+    // 系统返回键 → 返回网盘账号列表（而不是退出应用）
+    BackHandler { onExit() }
     var showActionSheet by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var showMove by remember { mutableStateOf(false) }

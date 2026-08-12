@@ -311,7 +311,7 @@ private fun FolderDownloadGroup(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
-                    .padding(14.dp),
+                    .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
@@ -351,12 +351,13 @@ private fun FolderDownloadGroup(
                 )
             }
 
-            // 总体进度条
+            // 总体进度条（收缩时作为卡片底线、底部留足边距；展开时衔接子任务列表）
             LinearProgressIndicator(
                 progress = { fraction },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = if (expanded) 6.dp else 12.dp),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
             )

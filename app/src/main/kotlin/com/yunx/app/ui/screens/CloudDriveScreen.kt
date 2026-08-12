@@ -1,6 +1,7 @@
 package com.yunx.app.ui.screens
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -81,6 +82,8 @@ fun CloudDriveScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
+    // 系统返回键 → 返回网盘账号列表（而不是退出应用）
+    BackHandler { onExit() }
     // 批量操作弹窗（多选模式底部栏触发：分享/移动需要设置或选目录，下载/删除直接执行）
     var showBatchActions by remember { mutableStateOf(false) }
     var batchInitial by remember { mutableStateOf(com.yunx.app.ui.screens.BatchStep.MENU) }

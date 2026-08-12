@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareSession
 import com.yunx.app.ui.items.MultiSelectAction
@@ -96,6 +97,8 @@ fun ShareDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val pathNames = viewModel.pathNames
+    // 系统返回键 → 返回上一级目录 / 根目录回输入页（而不是退出应用）
+    BackHandler { onBack() }
     // 多选模式：底部批量操作栏 + 处理中弹窗
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
