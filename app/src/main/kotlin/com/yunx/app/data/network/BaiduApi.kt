@@ -283,10 +283,12 @@ suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String):
 
     /**
      * 获取高速下载直链（官方 locatedownload 接口，对齐 MoePal 抓包）：
-     * POST d.pcs.baidu.com/rest/2.0/pcs/file?method=locatedownload&path=<转存后完整路径>，
-     * 响应 urls[].url 即 appallNN.baidupcs.com CDN 直链（自带 sign/expires，无需计算）。
+     * POST d.pcs.baidu.com/rest/2.0/pcs/file?method=locatedownload&path=<转存后完整路径>。
+     * 响应 urls[] 按 rank 返回多个候选 CDN 直链（自带 sign/expires，无需计算）：
+     *  - rank1 常为 d2-ant.baidu.com（encrypt=1 加密通道，内容需 AES-CTR 解密，且部分网络 TLS 握手失败）
+     *  - rank2+ 为 appallNN.baidupcs.com（encrypt=0 明文通道，可直接 Range 下载）
      * 仅需 BDUSS 登录态 + 手机 UA；psign 为写死常量，rand/devuid 复用抓包常量即可。
-     * @return appall 直链；失败抛异常
+     * @return 选中的 appall 明文直链；全部候选不可用时抛异常
      */
     suspend fun locateDownload(path: String, cookie: String): String = withContext(Dispatchers.IO) {
         val time = System.currentTimeMillis() / 1000
@@ -315,10 +317,21 @@ suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String):
             .build()
         val json = executeJson(request)
         checkErrno(json, "获取高速下载链接失败")
+        // 直链候选选择：优先 encrypt=0（明文，无需解密）的 https 直链（appall01/02）；
+        // rank1 的 d2-ant 为 encrypt=1 加密通道（需 AES-CTR 解密且部分网络 TLS 握手失败），直接排除；
+        // 全部为加密通道时退回第一个 https 候选（仍有尝试价值），最后兜底第一个候选。
         val urls = json.optJSONArray("urls")
-        val first = urls?.optJSONObject(0)?.optString("url")?.takeIf { it.isNotBlank() }
+        val candidates = (0 until (urls?.length() ?: 0))
+            .mapNotNull { urls?.optJSONObject(it) }
+            .filter { it.optString("url").isNotBlank() }
+        val directUrl = candidates
+            .filter { it.optInt("encrypt", 1) == 0 }
+            .sortedBy { !it.optString("url").startsWith("https") }
+            .firstOrNull()?.optString("url")
+            ?: candidates.firstOrNull { it.optString("url").startsWith("https") }?.optString("url")
+            ?: candidates.firstOrNull()?.optString("url")
             ?: throw BaiduApiException("未返回下载链接")
-        first
+        directUrl
     }
 
     /**

@@ -311,7 +311,10 @@ private fun FolderDownloadGroup(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
-                    .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 6.dp),
+                    .padding(
+                        start = 14.dp, end = 14.dp, top = 14.dp,
+                        bottom = if (expanded) 6.dp else 12.dp
+                    ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
@@ -351,16 +354,22 @@ private fun FolderDownloadGroup(
                 )
             }
 
-            // 总体进度条（收缩时作为卡片底线、底部留足边距；展开时衔接子任务列表）
-            LinearProgressIndicator(
-                progress = { fraction },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp)
-                    .padding(bottom = if (expanded) 6.dp else 12.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-            )
+            // 总体进度条：仅展开时显示（收缩时隐藏，保持卡片简洁）
+            AnimatedVisibility(
+                visible = expanded,
+                enter = fadeIn(tween(200)) + expandVertically(expandFrom = Alignment.Top),
+                exit = fadeOut(tween(150)) + shrinkVertically(shrinkTowards = Alignment.Top)
+            ) {
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp)
+                        .padding(bottom = 6.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                )
+            }
 
             // 展开的子任务列表（淡入 + 纵向展开）
             AnimatedVisibility(
