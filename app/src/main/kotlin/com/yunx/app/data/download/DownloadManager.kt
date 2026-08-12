@@ -63,6 +63,9 @@ class DownloadManager(
     private val activeJobs = ConcurrentHashMap<Long, CompletableDeferred<Job>>()
     private val jobsLock = Any()
 
+    /** 前台服务计数：有任务在下载时保持前台（避免切后台限速/进程被杀） */
+    private val activeTaskCount = java.util.concurrent.atomic.AtomicInteger(0)
+
     /** 每个任务一把互斥锁：暂停后立即恢复时避免新旧协程并发写分片 */
     private val taskLocks = ConcurrentHashMap<Long, Mutex>()
 
@@ -134,6 +137,8 @@ class DownloadManager(
             activeJobs[id] = deferred
             val job = scope.launch {
                 try {
+                    // 任务开始：有任务在下载时保持前台服务（避免切后台限速/进程被杀）
+                    onTaskStarted(id)
                     // 任务级互斥：同一任务串行执行，暂停后立刻恢复不会并发写分片
                     taskLocks.getOrPut(id) { Mutex() }.withLock {
                         runTask(id, effectiveHeaders)
@@ -152,6 +157,8 @@ class DownloadManager(
                         Log.w(TAG, "task $id cancelled: ${e.message}")
                     }
                 } finally {
+                    // 任务结束（成功/失败/暂停/删除）：无任务时停止前台服务
+                    onTaskFinished()
                     // 只移除自己注册的 deferred：
                     // 若暂停后立即恢复（新 job 已注册到同一 id），不能误删新任务的注册，
                     // 否则新任务将无法再被暂停/删除（后台继续下载）
@@ -164,6 +171,21 @@ class DownloadManager(
             }
             // launch 是同步返回 Job 的，锁内 complete，pause/remove 的 await 立即返回
             deferred.complete(job)
+        }
+    }
+
+    /** 任务开始/结束计数：控制前台服务生命周期（有任务在下载即保持前台） */
+    private suspend fun onTaskStarted(id: Long) {
+        if (activeTaskCount.getAndIncrement() == 0) {
+            val name = runCatching { dao.get(id)?.fileName }.getOrNull() ?: "下载任务"
+            DownloadService.start(context, name)
+        }
+    }
+
+    private fun onTaskFinished() {
+        if (activeTaskCount.decrementAndGet() <= 0) {
+            activeTaskCount.set(0)
+            DownloadService.stop(context)
         }
     }
 
