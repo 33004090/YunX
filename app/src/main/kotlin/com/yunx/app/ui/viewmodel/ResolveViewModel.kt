@@ -99,6 +99,10 @@ class ResolveViewModel(
     val isSaveBaidu: Boolean
         get() = currentPlatform == SharePlatform.BAIDU
 
+    /** 当前分享是否为百度（限速提示判断用） */
+    val isBaidu: Boolean
+        get() = currentPlatform == SharePlatform.BAIDU
+
     /** 当前分享是否为 139（UI 选择 139 版转存目录选择器） */
     val isSaveC139: Boolean
         get() = currentPlatform == SharePlatform.C139
