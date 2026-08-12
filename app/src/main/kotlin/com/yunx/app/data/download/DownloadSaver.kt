@@ -1,5 +1,7 @@
 package com.yunx.app.data.download
 
+import android.content.ContentResolver
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.os.Build
@@ -12,6 +14,7 @@ import java.io.File
  * 完成文件保存到公共 Download 目录：
  * - Android 10+（Q）：MediaStore.Downloads，无需存储权限；
  * - Android 9-：Environment.getExternalStoragePublicDirectory + WRITE_EXTERNAL_STORAGE。
+ * 幽灵文件（文件已删但 MediaStore 残留）导致同名 insert 失败时，自动加时间戳防重保存。
  */
 object DownloadSaver {
 
@@ -32,33 +35,21 @@ object DownloadSaver {
         val safeName = sanitizeFileName(baseName)
         val safeDir = dirRel.split('/').filter { it.isNotBlank() }
             .joinToString("/") { sanitizeFileName(it) }
-        // Android 10+ 优先 MediaStore；失败则回退传统文件路径；再失败兜底应用私有下载目录（保证不报错）
+        // Android 10+ 优先 MediaStore；失败则回退传统文件路径（Android 9- 可用）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             saveViaMediaStore(context, safeName, safeDir, source)?.let { return it }
             Log.e(TAG, "MediaStore 保存失败，回退传统路径：$safeDir/$safeName")
         }
         saveLegacy(context, safeName, safeDir, source)?.let { return it }
-        Log.e(TAG, "传统路径保存失败，兜底应用私有下载目录：$safeDir/$safeName")
-        return saveToAppDir(context, safeName, safeDir, source)
+        Log.e(TAG, "传统路径保存失败（Android 9- 需存储权限；Android 10+ 分区存储不可写），放弃保存")
+        return null
     }
-
-    /** 最后兜底：保存到应用私有外部下载目录（用户可在下载页点「打开」访问） */
-    private fun saveToAppDir(context: Context, fileName: String, subDir: String, source: File): String? =
-        runCatching {
-            val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
-            val destDir = if (subDir.isBlank()) dir else File(dir, subDir)
-            destDir.mkdirs()
-            val dest = File(destDir, fileName)
-            source.copyTo(dest, overwrite = true)
-            dest.absolutePath
-        }.getOrNull()
 
     /** 清洗文件名：非法字符替换为下划线，超长截断（保留扩展名），空名兜底 */
     private fun sanitizeFileName(name: String): String {
         var cleaned = name
             .replace(Regex("[\\\\/:*?\"<>|\\x00-\\x1f]"), "_")
             .trim()
-        // 文件系统/MediaStore 对文件名长度有限制：截断到合理长度并保留扩展名
         if (cleaned.length > 120) {
             val ext = cleaned.substringAfterLast('.', "").take(10)
             val base = cleaned.substringBeforeLast('.').take(100)
@@ -67,39 +58,91 @@ object DownloadSaver {
         return cleaned.ifBlank { "download_${System.currentTimeMillis()}" }
     }
 
+    /**
+     * MediaStore.Downloads 保存：
+     * 1. 保存前清理同路径同名残留记录（幽灵文件：文件已删但数据库仍在，部分 ROM 同名 insert 会返回 null）；
+     * 2. 原名 insert → 失败则在扩展名前加时间戳防重（最多 3 次，绕过幽灵/同名约束）；
+     * 3. 均失败返回 null（上层报错，不再兜底私有目录）。
+     */
     private fun saveViaMediaStore(context: Context, fileName: String, subDir: String, source: File): String? {
-        return try {
-            val resolver = context.contentResolver
-            val relativePath = if (subDir.isBlank()) {
-                Environment.DIRECTORY_DOWNLOADS
-            } else {
-                "${Environment.DIRECTORY_DOWNLOADS}/$subDir"
-            }
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE, mimeOf(fileName))
-                put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                ?: run {
-                    Log.e(TAG, "MediaStore insert 返回 null")
-                    return null
+        val resolver = context.contentResolver
+        val relativePath = if (subDir.isBlank()) {
+            Environment.DIRECTORY_DOWNLOADS
+        } else {
+            "${Environment.DIRECTORY_DOWNLOADS}/$subDir"
+        }
+        // 幽灵文件处理：保存前先清理同名残留记录
+        removeMediaStoreDuplicates(resolver, fileName, relativePath)
+        // 候选：原名 → 时间戳防重名（base.apk → base_20260812165000.apk → base_..._2.apk）
+        val candidates = buildList {
+            add(fileName)
+            repeat(3) { i -> add(timestampedName(fileName, i)) }
+        }
+        for (candidate in candidates) {
+            try {
+                removeMediaStoreDuplicates(resolver, candidate, relativePath)
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, candidate)
+                    put(MediaStore.Downloads.MIME_TYPE, mimeOf(candidate))
+                    put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
                 }
-            resolver.openOutputStream(uri)?.use { out ->
-                source.inputStream().use { it.copyTo(out) }
-            } ?: run {
-                Log.e(TAG, "MediaStore openOutputStream 失败")
-                resolver.delete(uri, null, null)
-                return null
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: continue
+                val wrote = resolver.openOutputStream(uri)?.use { out ->
+                    source.inputStream().use { it.copyTo(out) }
+                    true
+                } ?: run {
+                    resolver.delete(uri, null, null)
+                    false
+                }
+                if (!wrote) continue
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                return uri.toString()
+            } catch (e: Exception) {
+                Log.e(TAG, "MediaStore 保存异常（$candidate）: ${e.message}")
             }
-            values.clear()
-            values.put(MediaStore.Downloads.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-            uri.toString()
-        } catch (e: Exception) {
-            Log.e(TAG, "MediaStore 保存异常: ${e.message}")
-            null
+        }
+        return null
+    }
+
+    /** 在文件名扩展名前加时间戳防重：base.apk → base_20260812165000.apk */
+    private fun timestampedName(fileName: String, attempt: Int): String {
+        val dot = fileName.lastIndexOf('.')
+        val base = if (dot > 0) fileName.substring(0, dot) else fileName
+        val ext = if (dot > 0) fileName.substring(dot) else ""
+        val ts = System.currentTimeMillis()
+        return if (attempt == 0) "${base}_$ts$ext" else "${base}_${ts}_${attempt + 1}$ext"
+    }
+
+    /**
+     * 清理 MediaStore 中指定路径下的同名记录（幽灵文件：文件已删但数据库残留）。
+     * 只删数据库记录及对应文件（若仍存在）；随后可安全插入同名新记录。
+     */
+    private fun removeMediaStoreDuplicates(
+        resolver: ContentResolver,
+        fileName: String,
+        relativePath: String
+    ) {
+        runCatching {
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?"
+            val projection = arrayOf(MediaStore.Downloads._ID)
+            resolver.query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                arrayOf(fileName, relativePath),
+                null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(0)
+                    val uri = ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
+                    resolver.delete(uri, null, null)
+                }
+            }
+        }.onFailure {
+            Log.e(TAG, "清理 MediaStore 同名记录失败: ${it.message}")
         }
     }
 
