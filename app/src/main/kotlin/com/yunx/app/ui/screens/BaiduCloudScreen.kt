@@ -308,6 +308,10 @@ fun BaiduCloudScreen(
                 showActionSheet = false
                 viewModel.downloadFile()
             },
+            onDownloadFolder = {
+                showActionSheet = false
+                viewModel.downloadFolder()
+            },
             onRename = {
                 showActionSheet = false
                 showRename = true
@@ -383,6 +387,7 @@ fun BaiduCloudScreen(
         )
     }
 
+    // 操作执行中加载弹窗（下载文件夹/批量下载显示进度）
     if (viewModel.isOperating) {
         AlertDialog(
             onDismissRequest = { },
@@ -392,7 +397,10 @@ fun BaiduCloudScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("正在处理，请稍候…", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = viewModel.folderProgress ?: "正在处理，请稍候…",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
             }
         )
@@ -406,6 +414,7 @@ private fun BaiduActionSheet(
     file: ShareFile,
     viewModel: BaiduCloudViewModel,
     onDownload: () -> Unit,
+    onDownloadFolder: (() -> Unit)? = null,
     onRename: () -> Unit,
     onMove: () -> Unit,
     onShare: () -> Unit,
@@ -452,6 +461,8 @@ private fun BaiduActionSheet(
             Spacer(modifier = Modifier.height(8.dp))
             if (!file.isdir) {
                 BaiduActionItem(Icons.Outlined.Download, "下载", "使用内置下载功能保存到本机", MaterialTheme.colorScheme.primary, onDownload)
+            } else if (onDownloadFolder != null) {
+                BaiduActionItem(Icons.Outlined.Download, "下载文件夹", "递归下载整个文件夹，保持目录结构", MaterialTheme.colorScheme.primary, onDownloadFolder)
             }
             BaiduActionItem(Icons.Outlined.Share, "分享", "生成分享链接（带提取码）", MaterialTheme.colorScheme.primary, onShare)
             BaiduActionItem(Icons.Outlined.DriveFileMove, "移动到", "移动到网盘的其他目录", MaterialTheme.colorScheme.primary, onMove)

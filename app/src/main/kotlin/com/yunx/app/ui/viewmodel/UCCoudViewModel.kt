@@ -56,6 +56,10 @@ class UCCoudViewModel(
     var isOperating by mutableStateOf(false)
         private set
 
+    /** 文件夹下载/批量下载进度提示（如 "正在加入下载 3/10"）；null 不显示 */
+    var folderProgress by mutableStateOf<String?>(null)
+        private set
+
     /** 下拉刷新中 */
     var refreshing by mutableStateOf(false)
         private set
@@ -219,6 +223,83 @@ class UCCoudViewModel(
         api.getDownloadLink(fid, cookie)
             ?: api.cloudGetDownloadLink(fid, cookie)
 
+    /** UC 下载直链的请求头（OSS 按 Referer 档位限速，必须带官方 Referer/Origin） */
+    private fun downloadHeaders(cookie: String): Map<String, String> = mapOf(
+        "Cookie" to cookie,
+        "User-Agent" to UCConstants.USER_AGENT,
+        "Referer" to UCConstants.DOWNLOAD_REFERER,
+        "Origin" to UCConstants.WEB_ORIGIN
+    )
+
+    /**
+     * 递归收集文件夹内所有文件（保持目录结构）。
+     * @param dirFid 目录 fid
+     * @param prefix 相对路径前缀（如 "文件夹A/子目录"）
+     * @param result 输出：文件 + 相对路径（"文件夹A/子目录/文件.mp4"）
+     * @param depth 递归深度（防极端深层目录）
+     */
+    private suspend fun collectFolderFiles(
+        dirFid: String,
+        prefix: String,
+        cookie: String,
+        result: MutableList<Pair<ShareFile, String>>,
+        depth: Int
+    ) {
+        if (depth > 12) return
+        val list = runCatching { api.listCloudFiles(dirFid, cookie) ?: emptyList() }
+            .getOrDefault(emptyList())
+        // 先文件后文件夹（与目录列表展示顺序一致）
+        list.filter { !it.isdir }.forEach { result.add(it to "$prefix/${it.fname}") }
+        list.filter { it.isdir }.forEach {
+            collectFolderFiles(it.fid, "$prefix/${it.fname}", cookie, result, depth + 1)
+        }
+    }
+
+    /** 下载整个文件夹（操作菜单）：递归收集所有文件，保持目录结构保存到 Download */
+    fun downloadFolder() {
+        val folder = actionFile ?: return
+        if (!folder.isdir) return
+        viewModelScope.launch {
+            isOperating = true
+            folderProgress = "正在收集文件…"
+            try {
+                val cookie = cookieProvider()
+                if (cookie.isNullOrBlank()) {
+                    cloudMessage = "请先登录 UC 网盘"
+                    return@launch
+                }
+                val tasks = mutableListOf<Pair<ShareFile, String>>()
+                collectFolderFiles(folder.fid, folder.fname, cookie, tasks, 0)
+                if (tasks.isEmpty()) {
+                    cloudMessage = "文件夹为空"
+                    actionFile = null
+                    return@launch
+                }
+                var okCount = 0
+                tasks.forEachIndexed { index, (file, relPath) ->
+                    folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
+                    runCatching {
+                        val link = ucDownloadLink(file.fid, cookie) ?: return@runCatching
+                        downloadManager.enqueue(
+                            url = link.downloadUrl,
+                            fileName = relPath, // 相对路径：Download/文件夹A/子目录/文件.mp4
+                            size = link.size,
+                            headers = downloadHeaders(cookie)
+                        )
+                        okCount++
+                    }
+                }
+                cloudMessage = "已加入 $okCount 个下载任务"
+                actionFile = null
+            } catch (e: Exception) {
+                cloudMessage = e.message ?: "下载文件夹失败"
+            } finally {
+                isOperating = false
+                folderProgress = null
+            }
+        }
+    }
+
     /** 下载文件：取直链（带 Cookie+UA）→ 加入内置下载队列 */
     fun downloadFile() {
         val file = actionFile ?: return
@@ -339,43 +420,60 @@ class UCCoudViewModel(
 
     // ---------- 批量操作 ----------
 
-    /** 批量下载（不切页，保持处理中弹窗） */
+    /** 批量下载（不切页，保持处理中弹窗；选中文件夹时递归下载整个文件夹并保持目录结构） */
     fun downloadSelected() {
         val files = _selected.toList()
         if (files.isEmpty()) return
         viewModelScope.launch {
             isOperating = true
+            folderProgress = "正在收集文件…"
             try {
                 val cookie = cookieProvider()
                 if (cookie.isNullOrBlank()) {
                     cloudMessage = "请先登录 UC 网盘"
                     return@launch
                 }
+                // 展开选中项：文件直接加入，文件夹递归收集（相对路径 = 文件夹名/子目录/...）
+                val tasks = mutableListOf<Pair<ShareFile, String>>()
+                for (file in files) {
+                    if (file.isdir) {
+                        collectFolderFiles(file.fid, file.fname, cookie, tasks, 0)
+                    } else {
+                        tasks.add(file to file.fname)
+                    }
+                }
+                if (tasks.isEmpty()) {
+                    cloudMessage = "所选文件夹为空"
+                    exitMultiSelect()
+                    return@launch
+                }
                 var okCount = 0
-                files.forEach { file ->
+                var failCount = 0
+                tasks.forEachIndexed { index, (file, relPath) ->
+                    folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
                         val link = ucDownloadLink(file.fid, cookie) ?: return@runCatching
                         downloadManager.enqueue(
                             url = link.downloadUrl,
-                            fileName = link.filename.ifBlank { file.fname },
+                            // 文件夹内文件用相对路径（保持目录结构）；根目录文件用取链返回的文件名
+                            fileName = if (relPath.contains('/')) relPath else link.filename.ifBlank { relPath },
                             size = link.size,
-                            headers = mapOf(
-                                "Cookie" to cookie,
-                                // UC OSS 直链：必须带官方 Referer（否则被 Callback 限速 ~100KB/s）+ Origin，与解析页 UC 分支一致
-                                "User-Agent" to UCConstants.USER_AGENT,
-                                "Referer" to UCConstants.DOWNLOAD_REFERER,
-                                "Origin" to UCConstants.WEB_ORIGIN
-                            )
+                            headers = downloadHeaders(cookie)
                         )
                         okCount++
                     }
                 }
-                cloudMessage = "已加入 $okCount 个下载任务"
+                cloudMessage = if (failCount > 0) {
+                    "已加入 $okCount 个下载任务（$failCount 个失败）"
+                } else {
+                    "已加入 $okCount 个下载任务"
+                }
                 exitMultiSelect()
             } catch (e: Exception) {
                 cloudMessage = e.message ?: "批量下载失败"
             } finally {
                 isOperating = false
+                folderProgress = null
             }
         }
     }

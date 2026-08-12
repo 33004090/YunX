@@ -227,8 +227,10 @@ class DownloadManager(
         dao.updateStatus(id, DownloadTaskEntity.STATUS_DOWNLOADING)
         Log.d(TAG, "runTask: id=$id fileName=${task.fileName}")
 
-        val total = taskSizes[id]?.takeIf { it > 0 }
-            ?: downloader.getTotalSize(task.url, headers)
+        // 总大小以服务器探测为准（Range0-0 的 Content-Range 是真实总大小），
+        // 避免各平台传入的 size 与实际不符导致分片区间错误 → 文件截断/膨胀损坏
+        val total = downloader.getTotalSize(task.url, headers)
+            ?: taskSizes[id]?.takeIf { it > 0 }
         if (total == null) {
             // 服务器不返回文件大小（Range/Content-Length 均缺失）：降级为流式下载（开放区间 Range）
             Log.w(TAG, "runTask: id=$id 无法获取总大小，降级流式下载 url=${task.url.take(120)}")

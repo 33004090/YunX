@@ -312,6 +312,10 @@ fun UCCoudScreen(
                 showActionSheet = false
                 viewModel.downloadFile()
             },
+            onDownloadFolder = {
+                showActionSheet = false
+                viewModel.downloadFolder()
+            },
             onRename = {
                 showActionSheet = false
                 showRename = true
@@ -392,7 +396,7 @@ fun UCCoudScreen(
         )
     }
 
-    // 操作执行中加载弹窗
+    // 操作执行中加载弹窗（下载文件夹/批量下载显示进度）
     if (viewModel.isOperating) {
         AlertDialog(
             onDismissRequest = { },
@@ -402,7 +406,10 @@ fun UCCoudScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("正在处理，请稍候…", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = viewModel.folderProgress ?: "正在处理，请稍候…",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
             }
         )
@@ -416,6 +423,7 @@ private fun UCActionSheet(
     file: ShareFile,
     viewModel: UCCoudViewModel,
     onDownload: () -> Unit,
+    onDownloadFolder: (() -> Unit)? = null,
     onRename: () -> Unit,
     onMove: () -> Unit,
     onShare: () -> Unit,
@@ -462,6 +470,8 @@ private fun UCActionSheet(
             Spacer(modifier = Modifier.height(8.dp))
             if (!file.isdir) {
                 UCActionItem(Icons.Outlined.Download, "下载", "使用内置下载功能保存到本机", MaterialTheme.colorScheme.primary, onDownload)
+            } else if (onDownloadFolder != null) {
+                UCActionItem(Icons.Outlined.Download, "下载文件夹", "递归下载整个文件夹，保持目录结构", MaterialTheme.colorScheme.primary, onDownloadFolder)
             }
             UCActionItem(Icons.Outlined.Share, "分享", "生成分享链接（可设提取码/有效期）", MaterialTheme.colorScheme.primary, onShare)
             UCActionItem(Icons.Outlined.DriveFileMove, "移动到", "移动到网盘的其他目录", MaterialTheme.colorScheme.primary, onMove)

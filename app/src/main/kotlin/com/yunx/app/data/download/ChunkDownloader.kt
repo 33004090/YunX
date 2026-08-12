@@ -17,6 +17,7 @@ import java.io.IOException
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
+import kotlin.math.min
 
 private const val TAG = "YunX-DL"
 
@@ -175,11 +176,20 @@ class ChunkDownloader(private val client: OkHttpClient) {
                     raf.seek(existing)
                     body.byteStream().use { input ->
                         val buffer = ByteArray(BUFFER_SIZE)
+                        // 本轮预期写入 = 区间 [from, end] 大小（不含已有部分）；未知总大小时不限制（读到 EOF）
+                        val expected = if (unknownTotal) -1L else end - from + 1
+                        var written = 0L
                         while (true) {
                             val read = input.read(buffer)
                             if (read <= 0) break
-                            raf.write(buffer, 0, read)
-                            onBytes(read.toLong())
+                            // 服务器可能忽略 end 返回超量 body：严格截断到预期区间，避免文件膨胀损坏
+                            val allow = if (expected < 0) read.toLong()
+                            else min(read.toLong(), expected - written)
+                            if (allow <= 0) break
+                            raf.write(buffer, 0, allow.toInt())
+                            written += allow
+                            onBytes(allow)
+                            if (expected >= 0 && written >= expected) break // 已写满预期区间
                         }
                     }
                 }

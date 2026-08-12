@@ -18,27 +18,37 @@ object DownloadSaver {
     private const val TAG = "YunX-DL"
 
     /**
+     * 保存文件到公共 Download 目录。
+     * @param fileName 可为**相对路径**（如 "文件夹A/子/文件.mp4"，用于下载整个文件夹保持目录结构）；
+     *                 纯文件名时保存到 Download 根目录。
      * @return 保存成功后的标识（MediaStore uri 字符串或文件绝对路径）；失败返回 null
      */
     fun save(context: Context, fileName: String, source: File): String? {
-        // 清洗非法字符：网盘文件名可能含 / \ : * ? " < > | 或控制字符，导致 MediaStore/文件系统写入失败
-        val safeName = sanitizeFileName(fileName)
+        // 拆分相对路径与文件名：目录段与文件名分别清洗
+        val clean = fileName.replace('\\', '/')
+        val slash = clean.lastIndexOf('/')
+        val dirRel = if (slash > 0) clean.substring(0, slash) else ""
+        val baseName = if (slash >= 0) clean.substring(slash + 1) else clean
+        val safeName = sanitizeFileName(baseName)
+        val safeDir = dirRel.split('/').filter { it.isNotBlank() }
+            .joinToString("/") { sanitizeFileName(it) }
         // Android 10+ 优先 MediaStore；失败则回退传统文件路径；再失败兜底应用私有下载目录（保证不报错）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            saveViaMediaStore(context, safeName, source)?.let { return it }
-            Log.e(TAG, "MediaStore 保存失败，回退传统路径：$safeName")
+            saveViaMediaStore(context, safeName, safeDir, source)?.let { return it }
+            Log.e(TAG, "MediaStore 保存失败，回退传统路径：$safeDir/$safeName")
         }
-        saveLegacy(context, safeName, source)?.let { return it }
-        Log.e(TAG, "传统路径保存失败，兜底应用私有下载目录：$safeName")
-        return saveToAppDir(context, safeName, source)
+        saveLegacy(context, safeName, safeDir, source)?.let { return it }
+        Log.e(TAG, "传统路径保存失败，兜底应用私有下载目录：$safeDir/$safeName")
+        return saveToAppDir(context, safeName, safeDir, source)
     }
 
     /** 最后兜底：保存到应用私有外部下载目录（用户可在下载页点「打开」访问） */
-    private fun saveToAppDir(context: Context, fileName: String, source: File): String? =
+    private fun saveToAppDir(context: Context, fileName: String, subDir: String, source: File): String? =
         runCatching {
             val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
-            dir.mkdirs()
-            val dest = File(dir, fileName)
+            val destDir = if (subDir.isBlank()) dir else File(dir, subDir)
+            destDir.mkdirs()
+            val dest = File(destDir, fileName)
             source.copyTo(dest, overwrite = true)
             dest.absolutePath
         }.getOrNull()
@@ -57,13 +67,18 @@ object DownloadSaver {
         return cleaned.ifBlank { "download_${System.currentTimeMillis()}" }
     }
 
-    private fun saveViaMediaStore(context: Context, fileName: String, source: File): String? {
+    private fun saveViaMediaStore(context: Context, fileName: String, subDir: String, source: File): String? {
         return try {
             val resolver = context.contentResolver
+            val relativePath = if (subDir.isBlank()) {
+                Environment.DIRECTORY_DOWNLOADS
+            } else {
+                "${Environment.DIRECTORY_DOWNLOADS}/$subDir"
+            }
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, fileName)
                 put(MediaStore.Downloads.MIME_TYPE, mimeOf(fileName))
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
             val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
@@ -88,10 +103,11 @@ object DownloadSaver {
         }
     }
 
-    private fun saveLegacy(context: Context, fileName: String, source: File): String? = runCatching {
+    private fun saveLegacy(context: Context, fileName: String, subDir: String, source: File): String? = runCatching {
         val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        if (!dir.exists()) dir.mkdirs()
-        val dest = File(dir, fileName)
+        val destDir = if (subDir.isBlank()) dir else File(dir, subDir)
+        if (!destDir.exists()) destDir.mkdirs()
+        val dest = File(destDir, fileName)
         source.copyTo(dest, overwrite = true)
         dest.absolutePath
     }.getOrNull()

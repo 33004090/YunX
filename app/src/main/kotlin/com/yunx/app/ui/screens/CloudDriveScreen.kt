@@ -335,7 +335,7 @@ fun CloudDriveScreen(
         )
     }
 
-    // 操作执行中：加载弹窗（下载取链/分享/移动/删除）
+    // 操作执行中：加载弹窗（下载取链/分享/移动/删除；下载文件夹显示进度）
     if (viewModel.isOperating) {
         AlertDialog(
             onDismissRequest = { },
@@ -348,7 +348,10 @@ fun CloudDriveScreen(
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("正在处理，请稍候…", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = viewModel.folderProgress ?: "正在处理，请稍候…",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
             }
         )

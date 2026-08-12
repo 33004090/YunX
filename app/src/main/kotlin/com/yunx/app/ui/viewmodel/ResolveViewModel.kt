@@ -302,37 +302,76 @@ class ResolveViewModel(
         }
     }
 
-    /** 批量下载：逐个取直链入队（每取到一个立即后台下载，全部获取完再统一切到下载页） */
+    /** 批量下载：逐个取直链入队（选中文件夹时递归下载整个文件夹并保持目录结构，全部获取完再统一切到下载页） */
     fun batchDownload() {
         val files = _selected.toList()
         val s = session ?: return
         viewModelScope.launch {
             isBatchWorking = true
-            batchProgress = "0/${files.size}"
+            batchProgress = "正在收集文件…"
             try {
                 val credential = currentCredential()
                 if (credential.isNullOrBlank()) {
                     downloadError = "请先登录网盘"
                     return@launch
                 }
+                // 展开选中项：文件直接加入，文件夹递归收集（相对路径 = 文件夹名/子/...）
+                val tasks = mutableListOf<Pair<ShareFile, String>>()
+                for (file in files) {
+                    if (file.isdir) {
+                        collectShareFolder(s, file.fid, file.fname, credential, tasks, 0)
+                    } else {
+                        tasks.add(file to "")
+                    }
+                }
+                if (tasks.isEmpty()) {
+                    downloadError = "所选文件夹为空"
+                    exitMultiSelect()
+                    return@launch
+                }
                 var okCount = 0
-                files.forEachIndexed { index, file ->
-                    batchProgress = "${index + 1}/${files.size}"
+                tasks.forEachIndexed { index, (file, relPath) ->
+                    batchProgress = "${index + 1}/${tasks.size}"
                     runCatching {
                         currentRepo().getShareDownloadLink(s, file, credential).getOrNull()?.let { link ->
-                            enqueueDownload(link, credential)
+                            // 文件夹内文件用相对路径（保持目录结构）；根目录文件用取链返回的文件名
+                            enqueueDownload(link, credential, if (relPath.isBlank()) link.filename else relPath)
                             okCount++
                         }
                     }
                 }
                 downloadError = if (okCount > 0) "已加入 $okCount 个下载任务" else "获取下载链接失败"
                 exitMultiSelect()
-                // 全部获取完再一次性切到下载页（避免取到第一个就跳转、其余在后台悄悄进行）
+                // 全部获取完再一次性切到下载页
                 if (okCount > 0) downloadStarted = true
             } finally {
                 isBatchWorking = false
                 batchProgress = null
             }
+        }
+    }
+
+    /**
+     * 递归收集分享文件夹内所有文件（保持目录结构）。
+     * @param dirFid 分享内目录 fid
+     * @param prefix 相对路径前缀（如 "文件夹A/子目录"）
+     * @param result 输出：文件 + 相对路径（"文件夹A/子目录/文件.mp4"）
+     */
+    private suspend fun collectShareFolder(
+        s: ShareSession,
+        dirFid: String,
+        prefix: String,
+        credential: String,
+        result: MutableList<Pair<ShareFile, String>>,
+        depth: Int
+    ) {
+        if (depth > 12) return
+        val files = runCatching {
+            currentRepo().listFiles(s, dirFid, credential).getOrNull() ?: emptyList()
+        }.getOrDefault(emptyList())
+        files.filter { !it.isdir }.forEach { result.add(it to "$prefix/${it.fname}") }
+        files.filter { it.isdir }.forEach {
+            collectShareFolder(s, it.fid, "$prefix/${it.fname}", credential, result, depth + 1)
         }
     }
 
@@ -528,7 +567,11 @@ class ResolveViewModel(
      * 将直链加入下载队列（携带对应平台凭证与 UA；夸克直链做 CDN 节点优选）。
      * 不触发切页 —— 与 startDownload 的区别：批量下载全部入队后才统一切到下载页。
      */
-    private suspend fun enqueueDownload(link: DownloadLink, credential: String) {
+    private suspend fun enqueueDownload(
+        link: DownloadLink,
+        credential: String,
+        fileName: String = link.filename
+    ) {
         val isUC = currentPlatform == SharePlatform.UC
         val isXunlei = currentPlatform == SharePlatform.XUNLEI
         val isBaidu = currentPlatform == SharePlatform.BAIDU
@@ -565,7 +608,7 @@ class ResolveViewModel(
         }
         downloadManager.enqueue(
             url = effectiveUrl,
-            fileName = link.filename,
+            fileName = fileName,
             headers = headers,
             // 下载成功完成后：清理夸克临时转存子目录（根治 21001；其它平台 cleanupDirFid 为 null 自动跳过）
             onComplete = {

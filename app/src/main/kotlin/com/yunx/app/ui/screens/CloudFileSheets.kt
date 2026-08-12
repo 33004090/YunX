@@ -114,6 +114,10 @@ fun FileActionSheet(
                     viewModel.downloadFile()
                     onDismiss()
                 },
+                onDownloadFolder = {
+                    viewModel.downloadFolder()
+                    onDismiss()
+                },
                 onShare = { step = ActionStep.SHARE },
                 onMove = {
                     viewModel.openMoveRoot()
@@ -171,6 +175,7 @@ fun FileActionSheet(
 private fun ActionMenu(
     file: ShareFile,
     onDownload: () -> Unit,
+    onDownloadFolder: (() -> Unit)? = null,
     onShare: () -> Unit,
     onMove: () -> Unit,
     onRename: () -> Unit,
@@ -224,6 +229,14 @@ private fun ActionMenu(
                 desc = "使用内置下载功能保存到本机",
                 tint = MaterialTheme.colorScheme.primary,
                 onClick = onDownload
+            )
+        } else if (onDownloadFolder != null) {
+            ActionItem(
+                icon = Icons.Outlined.Download,
+                title = "下载文件夹",
+                desc = "递归下载整个文件夹，保持目录结构",
+                tint = MaterialTheme.colorScheme.primary,
+                onClick = onDownloadFolder
             )
         }
         ActionItem(

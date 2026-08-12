@@ -10,6 +10,13 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +36,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Pause
@@ -114,7 +124,13 @@ fun DownloadScreen(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(tasks, key = { it.id }) { task ->
+                // 根目录任务（无相对路径）单独显示
+                val rootTasks = tasks.filter { !it.fileName.contains('/') }
+                // 文件夹下载任务：按目录路径分组，合并为一个可展开项
+                val folderGroups = tasks.filter { it.fileName.contains('/') }
+                    .groupBy { it.fileName.substringBeforeLast('/') }
+
+                items(rootTasks, key = { it.id }) { task ->
                     DownloadTaskCard(
                         task = task,
                         stats = stats[task.id],
@@ -122,6 +138,19 @@ fun DownloadScreen(
                         onResume = { viewModel.resume(task.id) },
                         onRemove = { pendingDelete = task }
                     )
+                }
+
+                folderGroups.forEach { (folder, groupTasks) ->
+                    item(key = "folder_$folder") {
+                        FolderDownloadGroup(
+                            folder = folder,
+                            tasks = groupTasks,
+                            stats = stats,
+                            onPause = { viewModel.pause(it) },
+                            onResume = { viewModel.resume(it) },
+                            onRemove = { pendingDelete = it }
+                        )
+                    }
                 }
             }
         }
@@ -245,6 +274,115 @@ private fun EmptyDownloadState(modifier: Modifier = Modifier) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+/**
+ * 文件夹下载组：同一目录下的多个任务合并为一个可展开卡片。
+ * 收起时显示文件夹名 + 任务统计 + 总体进度；展开后显示子任务列表。
+ */
+@Composable
+private fun FolderDownloadGroup(
+    folder: String,
+    tasks: List<DownloadTaskEntity>,
+    stats: Map<Long, DownloadStats>,
+    onPause: (Long) -> Unit,
+    onResume: (Long) -> Unit,
+    onRemove: (DownloadTaskEntity) -> Unit
+) {
+    var expanded by remember { mutableStateOf(true) }
+    val completed = tasks.count { it.status == DownloadTaskEntity.STATUS_COMPLETED }
+    val totalSize = tasks.sumOf { it.totalSize }
+    val downloaded = tasks.sumOf { it.downloadedSize }
+    val fraction = if (totalSize > 0) {
+        (downloaded.toFloat() / totalSize).coerceIn(0f, 1f)
+    } else 0f
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
+    ) {
+        Column {
+            // 头部：点击展开/收起
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Outlined.Folder,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = folder,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${completed}/${tasks.size} 已完成 · ${formatSize(downloaded)} / ${formatSize(totalSize)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = if (expanded) "收起" else "展开",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // 总体进度条
+            LinearProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            )
+
+            // 展开的子任务列表（淡入 + 纵向展开）
+            AnimatedVisibility(
+                visible = expanded,
+                enter = fadeIn(tween(180)) + expandVertically(tween(180)),
+                exit = fadeOut(tween(140)) + shrinkVertically(tween(140))
+            ) {
+                Column(
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    tasks.forEach { task ->
+                        DownloadTaskCard(
+                            task = task,
+                            stats = stats[task.id],
+                            onPause = { onPause(task.id) },
+                            onResume = { onResume(task.id) },
+                            onRemove = { onRemove(task) }
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

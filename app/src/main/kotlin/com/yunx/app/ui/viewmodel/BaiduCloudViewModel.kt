@@ -50,6 +50,8 @@ class BaiduCloudViewModel(
         private set
     var isOperating by mutableStateOf(false)
         private set
+    var folderProgress by mutableStateOf<String?>(null)
+        private set
     var refreshing by mutableStateOf(false)
         private set
     var downloadTriggered by mutableStateOf(0)
@@ -197,6 +199,73 @@ class BaiduCloudViewModel(
 
     // ---------- 单文件操作 ----------
 
+    /** 百度下载直链的请求头（locatedownload 需 Cookie + netdisk UA） */
+    private fun downloadHeaders(cookie: String): Map<String, String> = mapOf(
+        "Cookie" to cookie,
+        "User-Agent" to BaiduConstants.UA_NETDISK
+    )
+
+    /**
+     * 递归收集文件夹内所有文件（保持目录结构）。
+     * 百度目录用绝对路径（dirPath），文件夹路径在 fidToken 字段。
+     */
+    private suspend fun collectFolderFiles(
+        dirPath: String,
+        prefix: String,
+        cookie: String,
+        result: MutableList<Pair<ShareFile, String>>,
+        depth: Int
+    ) {
+        if (depth > 12) return
+        val list = runCatching { api.listCloudFiles(dirPath, cookie) ?: emptyList() }
+            .getOrDefault(emptyList())
+        list.filter { !it.isdir }.forEach { result.add(it to "$prefix/${it.fname}") }
+        list.filter { it.isdir }.forEach {
+            collectFolderFiles(it.fidToken, "$prefix/${it.fname}", cookie, result, depth + 1)
+        }
+    }
+
+    /** 下载整个文件夹（操作菜单）：递归收集所有文件，保持目录结构保存到 Download */
+    fun downloadFolder() {
+        val folder = actionFile ?: return
+        if (!folder.isdir) return
+        viewModelScope.launch {
+            isOperating = true
+            folderProgress = "正在收集文件…"
+            try {
+                val cookie = cookie()
+                val tasks = mutableListOf<Pair<ShareFile, String>>()
+                collectFolderFiles(folder.fidToken, folder.fname, cookie, tasks, 0)
+                if (tasks.isEmpty()) {
+                    cloudMessage = "文件夹为空"
+                    actionFile = null
+                    return@launch
+                }
+                var okCount = 0
+                tasks.forEachIndexed { index, (file, relPath) ->
+                    folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
+                    runCatching {
+                        val link = api.locateDownload(file.fidToken, cookie)
+                        downloadManager.enqueue(
+                            url = link,
+                            fileName = relPath, // 相对路径：Download/文件夹A/子目录/文件.mp4
+                            size = file.fsize,
+                            headers = downloadHeaders(cookie)
+                        )
+                        okCount++
+                    }
+                }
+                cloudMessage = "已加入 $okCount 个下载任务"
+                actionFile = null
+            } catch (e: Exception) {
+                cloudMessage = e.message ?: "下载文件夹失败"
+            } finally {
+                isOperating = false
+                folderProgress = null
+            }
+        }
+    }
+
     /** 下载：locatedownload 取直链（需 Cookie + netdisk UA）→ 内置下载队列 */
     fun downloadFile() {
         val file = actionFile ?: return
@@ -307,35 +376,55 @@ class BaiduCloudViewModel(
 
     // ---------- 批量操作 ----------
 
-    /** 批量下载（不切页） */
+    /** 批量下载（不切页；选中文件夹时递归下载整个文件夹并保持目录结构） */
     fun downloadSelected() {
         val files = _selected.toList()
         if (files.isEmpty()) return
         viewModelScope.launch {
             isOperating = true
+            folderProgress = "正在收集文件…"
             try {
+                val cookie = cookie()
+                // 展开选中项：文件直接加入，文件夹递归收集
+                val tasks = mutableListOf<Pair<ShareFile, String>>()
+                for (file in files) {
+                    if (file.isdir) {
+                        collectFolderFiles(file.fidToken, file.fname, cookie, tasks, 0)
+                    } else {
+                        tasks.add(file to file.fname)
+                    }
+                }
+                if (tasks.isEmpty()) {
+                    cloudMessage = "所选文件夹为空"
+                    exitMultiSelect()
+                    return@launch
+                }
                 var okCount = 0
-                files.forEach { file ->
+                var failCount = 0
+                tasks.forEachIndexed { index, (file, relPath) ->
+                    folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
-                        val link = api.locateDownload(file.fidToken, cookie())
+                        val link = api.locateDownload(file.fidToken, cookie)
                         downloadManager.enqueue(
                             url = link,
-                            fileName = file.fname,
+                            fileName = if (relPath.contains('/')) relPath else file.fname,
                             size = file.fsize,
-                            headers = mapOf(
-                                "Cookie" to cookie(),
-                                "User-Agent" to BaiduConstants.UA_NETDISK
-                            )
+                            headers = downloadHeaders(cookie)
                         )
                         okCount++
                     }
                 }
-                cloudMessage = "已加入 $okCount 个下载任务"
+                cloudMessage = if (failCount > 0) {
+                    "已加入 $okCount 个下载任务（$failCount 个失败）"
+                } else {
+                    "已加入 $okCount 个下载任务"
+                }
                 exitMultiSelect()
             } catch (e: Exception) {
                 cloudMessage = e.message ?: "批量下载失败"
             } finally {
                 isOperating = false
+                folderProgress = null
             }
         }
     }

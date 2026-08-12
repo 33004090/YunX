@@ -51,6 +51,8 @@ class C139CloudViewModel(
         private set
     var isOperating by mutableStateOf(false)
         private set
+    var folderProgress by mutableStateOf<String?>(null)
+        private set
     var refreshing by mutableStateOf(false)
         private set
     var downloadTriggered by mutableStateOf(0)
@@ -197,6 +199,71 @@ class C139CloudViewModel(
 
     // ---------- 单文件操作 ----------
 
+    /** 139 下载直链的请求头（OBS 直链，UA + Referer） */
+    private fun downloadHeaders(): Map<String, String> = mapOf(
+        "User-Agent" to C139Constants.PC_UA,
+        "Referer" to "https://yun.139.com/"
+    )
+
+    /**
+     * 递归收集文件夹内所有文件（保持目录结构）。
+     */
+    private suspend fun collectFolderFiles(
+        dirId: String,
+        prefix: String,
+        cookie: String,
+        result: MutableList<Pair<ShareFile, String>>,
+        depth: Int
+    ) {
+        if (depth > 12) return
+        val list = runCatching { api.listCloudFiles(dirId, cookie).first }.getOrDefault(emptyList())
+        list.filter { !it.isdir }.forEach { result.add(it to "$prefix/${it.fname}") }
+        list.filter { it.isdir }.forEach {
+            collectFolderFiles(it.fid, "$prefix/${it.fname}", cookie, result, depth + 1)
+        }
+    }
+
+    /** 下载整个文件夹（操作菜单）：递归收集所有文件，保持目录结构保存到 Download */
+    fun downloadFolder() {
+        val folder = actionFile ?: return
+        if (!folder.isdir) return
+        viewModelScope.launch {
+            isOperating = true
+            folderProgress = "正在收集文件…"
+            try {
+                val cookie = cookie()
+                val tasks = mutableListOf<Pair<ShareFile, String>>()
+                collectFolderFiles(folder.fid, folder.fname, cookie, tasks, 0)
+                if (tasks.isEmpty()) {
+                    cloudMessage = "文件夹为空"
+                    actionFile = null
+                    return@launch
+                }
+                var okCount = 0
+                tasks.forEachIndexed { index, (file, relPath) ->
+                    folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
+                    runCatching {
+                        val link = api.getDownloadUrl(file.fid, cookie) ?: return@runCatching
+                        downloadManager.enqueue(
+                            url = link.downloadUrl,
+                            fileName = relPath, // 相对路径：Download/文件夹A/子目录/文件.mp4
+                            size = link.size,
+                            headers = downloadHeaders()
+                        )
+                        okCount++
+                    }
+                }
+                cloudMessage = "已加入 $okCount 个下载任务"
+                actionFile = null
+            } catch (e: Exception) {
+                cloudMessage = e.message ?: "下载文件夹失败"
+            } finally {
+                isOperating = false
+                folderProgress = null
+            }
+        }
+    }
+
     /** 下载：getDownloadUrl 取 OBS 直链（900s 有效，UA + Referer 即可）→ 内置下载队列 */
     fun downloadFile() {
         val file = actionFile ?: return
@@ -306,36 +373,56 @@ class C139CloudViewModel(
 
     // ---------- 批量操作 ----------
 
-    /** 批量下载（不切页） */
+    /** 批量下载（不切页；选中文件夹时递归下载整个文件夹并保持目录结构） */
     fun downloadSelected() {
         val files = _selected.toList()
         if (files.isEmpty()) return
         viewModelScope.launch {
             isOperating = true
+            folderProgress = "正在收集文件…"
             try {
+                val cookie = cookie()
+                // 展开选中项：文件直接加入，文件夹递归收集
+                val tasks = mutableListOf<Pair<ShareFile, String>>()
+                for (file in files) {
+                    if (file.isdir) {
+                        collectFolderFiles(file.fid, file.fname, cookie, tasks, 0)
+                    } else {
+                        tasks.add(file to file.fname)
+                    }
+                }
+                if (tasks.isEmpty()) {
+                    cloudMessage = "所选文件夹为空"
+                    exitMultiSelect()
+                    return@launch
+                }
                 var okCount = 0
-                files.forEach { file ->
+                var failCount = 0
+                tasks.forEachIndexed { index, (file, relPath) ->
+                    folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
-                        val link = api.getDownloadUrl(file.fid, cookie()) ?: return@runCatching
+                        val link = api.getDownloadUrl(file.fid, cookie) ?: return@runCatching
                         downloadManager.enqueue(
                             url = link.downloadUrl,
-                            // 139 getDownloadUrl 响应不含 name → 用列表里的文件名（避免 fileId 乱码）
-                            fileName = file.fname.ifBlank { link.filename },
+                            // 文件夹内文件用相对路径；根目录文件用列表文件名（139 取链响应不含 name）
+                            fileName = if (relPath.contains('/')) relPath else file.fname.ifBlank { link.filename },
                             size = link.size,
-                            headers = mapOf(
-                                "User-Agent" to C139Constants.PC_UA,
-                                "Referer" to "https://yun.139.com/"
-                            )
+                            headers = downloadHeaders()
                         )
                         okCount++
                     }
                 }
-                cloudMessage = "已加入 $okCount 个下载任务"
+                cloudMessage = if (failCount > 0) {
+                    "已加入 $okCount 个下载任务（$failCount 个失败）"
+                } else {
+                    "已加入 $okCount 个下载任务"
+                }
                 exitMultiSelect()
             } catch (e: Exception) {
                 cloudMessage = e.message ?: "批量下载失败"
             } finally {
                 isOperating = false
+                folderProgress = null
             }
         }
     }

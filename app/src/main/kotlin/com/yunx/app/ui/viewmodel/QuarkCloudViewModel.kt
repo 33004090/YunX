@@ -54,6 +54,10 @@ class QuarkCloudViewModel(
     var isOperating by mutableStateOf(false)
         private set
 
+    /** 文件夹下载/批量下载进度提示（如 "正在加入下载 3/10"）；null 不显示 */
+    var folderProgress by mutableStateOf<String?>(null)
+        private set
+
     /** 下拉刷新中（不切换 Loading 遮罩，保持列表显示） */
     var refreshing by mutableStateOf(false)
         private set
@@ -220,6 +224,77 @@ class QuarkCloudViewModel(
         shareResult = null
     }
 
+    /** 夸克下载直链的请求头（Cookie + 网盘 UA） */
+    private fun downloadHeaders(cookie: String): Map<String, String> = mapOf(
+        "Cookie" to cookie,
+        "User-Agent" to com.yunx.app.data.network.QuarkConstants.API_USER_AGENT
+    )
+
+    /**
+     * 递归收集文件夹内所有文件（保持目录结构）。
+     */
+    private suspend fun collectFolderFiles(
+        dirFid: String,
+        prefix: String,
+        cookie: String,
+        result: MutableList<Pair<ShareFile, String>>,
+        depth: Int
+    ) {
+        if (depth > 12) return
+        val list = runCatching { api.listCloudFiles(dirFid, cookie) ?: emptyList() }
+            .getOrDefault(emptyList())
+        list.filter { !it.isdir }.forEach { result.add(it to "$prefix/${it.fname}") }
+        list.filter { it.isdir }.forEach {
+            collectFolderFiles(it.fid, "$prefix/${it.fname}", cookie, result, depth + 1)
+        }
+    }
+
+    /** 下载整个文件夹（操作菜单）：递归收集所有文件，保持目录结构保存到 Download */
+    fun downloadFolder() {
+        val folder = actionFile ?: return
+        if (!folder.isdir) return
+        viewModelScope.launch {
+            isOperating = true
+            folderProgress = "正在收集文件…"
+            try {
+                val cookie = cookieProvider()
+                if (cookie.isNullOrBlank()) {
+                    cloudMessage = "请先登录夸克网盘"
+                    return@launch
+                }
+                val tasks = mutableListOf<Pair<ShareFile, String>>()
+                collectFolderFiles(folder.fid, folder.fname, cookie, tasks, 0)
+                if (tasks.isEmpty()) {
+                    cloudMessage = "文件夹为空"
+                    actionFile = null
+                    return@launch
+                }
+                var okCount = 0
+                tasks.forEachIndexed { index, (file, relPath) ->
+                    folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
+                    runCatching {
+                        val link = api.getDownloadLink(file.fid, cookie) ?: return@runCatching
+                        val effectiveUrl = com.yunx.app.data.network.QuarkCdn.fastest(link.downloadUrl, cookie)
+                        downloadManager.enqueue(
+                            url = effectiveUrl,
+                            fileName = relPath, // 相对路径：Download/文件夹A/子目录/文件.mp4
+                            size = link.size,
+                            headers = downloadHeaders(cookie)
+                        )
+                        okCount++
+                    }
+                }
+                cloudMessage = "已加入 $okCount 个下载任务"
+                actionFile = null
+            } catch (e: Exception) {
+                cloudMessage = e.message ?: "下载文件夹失败"
+            } finally {
+                isOperating = false
+                folderProgress = null
+            }
+        }
+    }
+
     /** 下载文件：取直链 → 加入内置下载队列 */
     fun downloadFile() {
         val file = actionFile ?: return
@@ -365,42 +440,61 @@ class QuarkCloudViewModel(
 
     // ---------- 批量操作（多选） ----------
 
-    /** 批量下载：逐个取直链加入下载队列 */
+    /** 批量下载：逐个取直链加入下载队列（选中文件夹时递归下载整个文件夹并保持目录结构） */
     fun downloadSelected() {
         val files = _selected.toList()
         if (files.isEmpty()) return
         viewModelScope.launch {
             isOperating = true
+            folderProgress = "正在收集文件…"
             try {
                 val cookie = cookieProvider()
                 if (cookie.isNullOrBlank()) {
                     cloudMessage = "请先登录夸克网盘"
                     return@launch
                 }
+                // 展开选中项：文件直接加入，文件夹递归收集
+                val tasks = mutableListOf<Pair<ShareFile, String>>()
+                for (file in files) {
+                    if (file.isdir) {
+                        collectFolderFiles(file.fid, file.fname, cookie, tasks, 0)
+                    } else {
+                        tasks.add(file to file.fname)
+                    }
+                }
+                if (tasks.isEmpty()) {
+                    cloudMessage = "所选文件夹为空"
+                    exitMultiSelect()
+                    return@launch
+                }
                 var okCount = 0
-                files.forEach { file ->
+                var failCount = 0
+                tasks.forEachIndexed { index, (file, relPath) ->
+                    folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
                         val link = api.getDownloadLink(file.fid, cookie) ?: return@runCatching
                         val effectiveUrl = com.yunx.app.data.network.QuarkCdn.fastest(link.downloadUrl, cookie)
                         downloadManager.enqueue(
                             url = effectiveUrl,
-                            fileName = link.filename.ifBlank { file.fname },
+                            fileName = if (relPath.contains('/')) relPath else link.filename.ifBlank { relPath },
                             size = link.size,
-                            headers = mapOf(
-                                "Cookie" to cookie,
-                                "User-Agent" to com.yunx.app.data.network.QuarkConstants.API_USER_AGENT
-                            )
+                            headers = downloadHeaders(cookie)
                         )
                         okCount++
                     }
                 }
-                cloudMessage = "已加入 $okCount 个下载任务"
+                cloudMessage = if (failCount > 0) {
+                    "已加入 $okCount 个下载任务（$failCount 个失败）"
+                } else {
+                    "已加入 $okCount 个下载任务"
+                }
                 exitMultiSelect()
                 // 批量下载不自动切页：保持网盘页显示处理中弹窗（单文件下载才切到下载页）
             } catch (e: Exception) {
                 cloudMessage = e.message ?: "批量下载失败"
             } finally {
                 isOperating = false
+                folderProgress = null
             }
         }
     }
