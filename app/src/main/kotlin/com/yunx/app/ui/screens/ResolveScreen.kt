@@ -3,7 +3,6 @@ package com.yunx.app.ui.screens
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
-import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -62,6 +61,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.yunx.app.data.network.ShareLinkParser
 import com.yunx.app.data.network.SharePlatform
+import com.yunx.app.ui.SnackbarController
 import com.yunx.app.ui.resolve.DownloadLinkDialog
 import com.yunx.app.ui.resolve.ShareDetailScreen
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
@@ -167,7 +167,7 @@ fun ResolveScreen(
     // 下载错误提示
     LaunchedEffect(downloadError) {
         downloadError?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            SnackbarController.show(it)
             viewModel.consumeDownloadError()
         }
     }

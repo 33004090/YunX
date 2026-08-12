@@ -17,6 +17,13 @@ class SettingsRepository(context: Context) {
             prefs.edit().putInt("download_threads", value.coerceIn(1, 512)).apply()
         }
 
+    /** 百度网盘大文件限速提示：是否已选择「不再显示」 */
+    var baiduLimitHintDismissed: Boolean
+        get() = prefs.getBoolean("baidu_limit_hint_dismissed", false)
+        set(value) {
+            prefs.edit().putBoolean("baidu_limit_hint_dismissed", value).apply()
+        }
+
     companion object {
         const val DEFAULT_DOWNLOAD_THREADS = 16
     }

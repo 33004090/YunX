@@ -3,7 +3,6 @@ package com.yunx.app.ui.resolve
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +19,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yunx.app.data.network.model.DownloadLink
+import com.yunx.app.ui.SnackbarController
+import com.yunx.app.ui.rememberGlobalSnackbarHostState
 
 /**
  * 下载直链弹窗：展示文件名与直链（长按直链复制），支持「开始下载」（分片多线程下载）。
@@ -43,6 +45,8 @@ fun DownloadLinkDialog(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // Dialog 内提示宿主（AlertDialog 为独立窗口）
+    val snackbarHostState = rememberGlobalSnackbarHostState()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -76,7 +80,7 @@ fun DownloadLinkDialog(
                                 onClick = {},
                                 onLongClick = {
                                     copyToClipboard(context, link.downloadUrl)
-                                    Toast.makeText(context, "下载链接已复制", Toast.LENGTH_SHORT).show()
+                                    SnackbarController.show("下载链接已复制")
                                 }
                             ),
                         style = MaterialTheme.typography.labelSmall.copy(
@@ -95,6 +99,8 @@ fun DownloadLinkDialog(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // Dialog 内提示（AlertDialog 为独立窗口，需自带 Snackbar 宿主）
+                SnackbarHost(hostState = snackbarHostState)
             }
         },
         confirmButton = {

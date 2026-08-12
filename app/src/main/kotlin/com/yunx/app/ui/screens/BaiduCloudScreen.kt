@@ -1,6 +1,6 @@
 package com.yunx.app.ui.screens
 
-import android.widget.Toast
+import com.yunx.app.ui.SnackbarController
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.network.model.ShareFile
+import com.yunx.app.data.prefs.SettingsRepository
 import com.yunx.app.ui.items.MultiSelectAction
 import com.yunx.app.ui.items.MultiSelectBar
 import com.yunx.app.ui.resolve.BackToParentItem
@@ -75,6 +77,9 @@ import com.yunx.app.ui.resolve.CrumbBar
 import com.yunx.app.ui.resolve.ShareFileRow
 import com.yunx.app.ui.viewmodel.BaiduCloudUiState
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
+
+/** 百度非会员限速阈值：>300MB 提示 */
+private const val BAIDU_LIMIT_BYTES = 300L * 1024 * 1024
 
 /**
  * 百度网盘云盘浏览页（参考夸克/UC/迅雷云盘）：
@@ -102,9 +107,25 @@ fun BaiduCloudScreen(
     var showShare by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
+    // 百度非会员 >300MB 限速提示：记住「不再显示」，单文件/批量下载前拦截
+    val settingsRepo = remember { SettingsRepository(context) }
+    var limitHintDismissed by remember { mutableStateOf(settingsRepo.baiduLimitHintDismissed) }
+    var showBaiduLimitDialog by remember { mutableStateOf(false) }
+    var pendingBaiduDownload by remember { mutableStateOf<String?>(null) } // "single" / "batch"
+
+    /** 判断是否需要弹限速提示；需要则记录待执行动作并弹窗，否则直接执行 */
+    fun maybeShowBaiduLimit(files: List<ShareFile>, action: String, onProceed: () -> Unit) {
+        if (!limitHintDismissed && files.any { it.fsize > BAIDU_LIMIT_BYTES }) {
+            pendingBaiduDownload = action
+            showBaiduLimitDialog = true
+        } else {
+            onProceed()
+        }
+    }
+
     LaunchedEffect(viewModel.cloudMessage) {
         viewModel.cloudMessage?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            SnackbarController.show(it)
             viewModel.consumeMessage()
         }
     }
@@ -285,7 +306,7 @@ fun BaiduCloudScreen(
                             count = viewModel.selected.size,
                             actions = listOf(
                                 MultiSelectAction("下载", Icons.Outlined.Download, MaterialTheme.colorScheme.primary) {
-                                    viewModel.downloadSelected()
+                                    maybeShowBaiduLimit(viewModel.selected, "batch") { viewModel.downloadSelected() }
                                 },
                                 MultiSelectAction("分享", Icons.Outlined.Share, MaterialTheme.colorScheme.primary) {
                                     showShare = true
@@ -312,7 +333,10 @@ fun BaiduCloudScreen(
             viewModel = viewModel,
             onDownload = {
                 showActionSheet = false
-                viewModel.downloadFile()
+                val f = viewModel.actionFile
+                if (f != null) {
+                    maybeShowBaiduLimit(listOf(f), "single") { viewModel.downloadFile() }
+                }
             },
             onDownloadFolder = {
                 showActionSheet = false
@@ -408,6 +432,45 @@ fun BaiduCloudScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
+            }
+        )
+    }
+
+    // 百度非会员 >300MB 限速提示弹窗（可勾选不再显示）
+    if (showBaiduLimitDialog) {
+        var neverShow by remember { mutableStateOf(limitHintDismissed) }
+        AlertDialog(
+            onDismissRequest = { showBaiduLimitDialog = false },
+            title = { Text("下载大文件提示") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "百度网盘非会员超过300MB会被限速，下载速度可能较慢。是否继续下载？",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = neverShow, onCheckedChange = { neverShow = it })
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("不再显示此提示", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showBaiduLimitDialog = false
+                        settingsRepo.baiduLimitHintDismissed = neverShow
+                        limitHintDismissed = neverShow
+                        when (pendingBaiduDownload) {
+                            "single" -> viewModel.downloadFile()
+                            "batch" -> viewModel.downloadSelected()
+                        }
+                        pendingBaiduDownload = null
+                    }
+                ) { Text("继续下载") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBaiduLimitDialog = false }) { Text("取消") }
             }
         )
     }

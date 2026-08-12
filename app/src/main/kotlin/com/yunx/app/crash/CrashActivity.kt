@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Process
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -45,6 +44,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yunx.app.MainActivity
+import com.yunx.app.ui.GlobalSnackbarHost
+import com.yunx.app.ui.SnackbarController
 import com.yunx.app.ui.items.CustomFabMenu
 import com.yunx.app.ui.items.FabMenuItem
 import com.yunx.app.ui.theme.ComposeEmptyActivityTheme
@@ -78,7 +79,7 @@ private fun CrashScreen(crashLog: String) {
                 icon = Icons.Outlined.ContentCopy,
                 onClick = {
                     copyToClipboard(context, crashLog)
-                    Toast.makeText(context, "崩溃信息已复制", Toast.LENGTH_SHORT).show()
+                    SnackbarController.show("崩溃信息已复制")
                 }
             ),
             FabMenuItem(
@@ -154,6 +155,9 @@ private fun CrashScreen(crashLog: String) {
             onCheckedChange = { fabExpanded = it },
             items = menuItems
         )
+
+        // 全局 Snackbar（崩溃页为独立 Activity，需自带宿主）
+        GlobalSnackbarHost()
     }
 }
 

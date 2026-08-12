@@ -1,6 +1,6 @@
 package com.yunx.app.ui.screens
 
-import android.widget.Toast
+import com.yunx.app.ui.SnackbarController
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -93,7 +93,7 @@ fun CloudDriveScreen(
     // 操作结果 Toast（放在本层：弹窗关闭后仍能正常弹出）
     LaunchedEffect(viewModel.cloudMessage) {
         viewModel.cloudMessage?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            SnackbarController.show(it)
             viewModel.consumeMessage()
         }
     }

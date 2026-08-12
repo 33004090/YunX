@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
@@ -39,7 +40,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import com.yunx.app.data.db.AppDatabase
 import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
@@ -391,10 +391,14 @@ fun MainScreen() {
     val topAppBarState = rememberTopAppBarState()
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(topAppBarState)
 
+    // 全局 Snackbar 宿主（Material3，替换原 Toast 提示）
+    val snackbarHostState = rememberGlobalSnackbarHostState()
+
     // 主框架与全屏覆盖层（关于页）放在同一 Box：覆盖层带过渡动画
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             LargeTopAppBar(
                 title = {
@@ -536,9 +540,9 @@ fun MainScreen() {
                             downloadManager.enqueue(url = apk.downloadUrl, fileName = apk.name)
                             currentTab = MainTab.Download
                         }
-                        Toast.makeText(context, "已加入下载，完成后点击「打开」即可安装", Toast.LENGTH_SHORT).show()
+                        SnackbarController.show("已加入下载，完成后点击「打开」即可安装")
                     } else {
-                        Toast.makeText(context, "未找到 APK 下载链接", Toast.LENGTH_SHORT).show()
+                        SnackbarController.show("未找到 APK 下载链接")
                     }
                 },
                 onLater = { showUpdateDialog = false },

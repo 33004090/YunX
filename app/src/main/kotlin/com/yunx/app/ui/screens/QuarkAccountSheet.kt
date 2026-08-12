@@ -3,7 +3,6 @@ package com.yunx.app.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -54,6 +54,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yunx.app.data.db.QuarkAccountEntity
+import com.yunx.app.ui.SnackbarController
+import com.yunx.app.ui.rememberGlobalSnackbarHostState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -85,6 +87,8 @@ fun QuarkAccountSheet(
     }
 
     // 打开即完全展开，跳过半折叠状态
+    // ModalBottomSheet 为独立窗口，需自带 Snackbar 宿主
+    val snackbarHostState = rememberGlobalSnackbarHostState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // 内容滚动到底后继续上滑的滚动量直接消费，避免传给 Sheet 造成上下抽动
@@ -213,7 +217,7 @@ fun QuarkAccountSheet(
                         TextButton(
                             onClick = {
                                 copyToClipboard(context, account.cookie)
-                                Toast.makeText(context, "Cookie 已复制", Toast.LENGTH_SHORT).show()
+                                SnackbarController.show("Cookie 已复制")
                             }
                         ) {
                             Icon(
@@ -249,6 +253,9 @@ fun QuarkAccountSheet(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("退出登录")
             }
+
+            // 复制提示（ModalBottomSheet 为独立窗口，需自带 Snackbar 宿主）
+            SnackbarHost(hostState = snackbarHostState)
         }
     }
 

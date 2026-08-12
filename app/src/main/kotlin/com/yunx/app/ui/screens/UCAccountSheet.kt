@@ -3,7 +3,6 @@ package com.yunx.app.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -27,6 +26,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yunx.app.data.db.UCAccountEntity
+import com.yunx.app.ui.SnackbarController
+import com.yunx.app.ui.rememberGlobalSnackbarHostState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,6 +52,8 @@ fun UCAccountSheet(
     val loginTime = remember(account.updatedAt) {
         SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(account.updatedAt))
     }
+    // ModalBottomSheet 为独立窗口，需自带 Snackbar 宿主
+    val snackbarHostState = rememberGlobalSnackbarHostState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scrollState = rememberScrollState()
     val sheetNestedScroll = remember(scrollState) {
@@ -103,7 +106,7 @@ fun UCAccountSheet(
                         if (cookieTruncated) TextButton(onClick = { showFullCookie = !showFullCookie }) { Text(if (showFullCookie) "收起" else "展开全部") }
                         TextButton(onClick = {
                             copyToClipboard(context, account.cookie)
-                            Toast.makeText(context, "Cookie 已复制", Toast.LENGTH_SHORT).show()
+                            SnackbarController.show("Cookie 已复制")
                         }) {
                             Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp)); Text("复制")
@@ -117,6 +120,9 @@ fun UCAccountSheet(
                 Icon(Icons.Outlined.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp)); Text("退出登录")
             }
+
+            // 复制提示（ModalBottomSheet 为独立窗口，需自带 Snackbar 宿主）
+            SnackbarHost(hostState = snackbarHostState)
         }
     }
 

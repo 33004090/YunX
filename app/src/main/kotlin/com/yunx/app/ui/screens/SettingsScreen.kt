@@ -1,6 +1,5 @@
 package com.yunx.app.ui.screens
 
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -47,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.backup.AuthBackupManager
+import com.yunx.app.ui.SnackbarController
 import com.yunx.app.util.LogExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -85,16 +85,16 @@ fun SettingsScreen(
                     context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
                 }.getOrNull()
                 if (text == null) {
-                    Toast.makeText(context, "读取文件失败", Toast.LENGTH_SHORT).show()
+                    SnackbarController.show("读取文件失败")
                     return@launch
                 }
                 val count = runCatching {
                     withContext(Dispatchers.IO) { backupManager.importJson(text) }
                 }.getOrElse { e ->
-                    Toast.makeText(context, "导入失败：${e.message}", Toast.LENGTH_SHORT).show()
+                    SnackbarController.show("导入失败：${e.message}")
                     return@launch
                 }
-                Toast.makeText(context, "已恢复 $count 个平台的认证信息", Toast.LENGTH_SHORT).show()
+                SnackbarController.show("已恢复 $count 个平台的认证信息")
             }
         }
     }
@@ -147,17 +147,13 @@ fun SettingsScreen(
                         withContext(Dispatchers.IO) { backupManager.exportJson() }
                     }.getOrNull()
                     if (json == null) {
-                        Toast.makeText(context, "导出失败", Toast.LENGTH_SHORT).show()
+                        SnackbarController.show("导出失败")
                         return@launch
                     }
                     val saved = withContext(Dispatchers.IO) {
                         backupManager.saveToDownloads(context, json)
                     }
-                    Toast.makeText(
-                        context,
-                        if (saved) "已导出到下载目录" else "导出失败",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    SnackbarController.show(if (saved) "已导出到下载目录" else "导出失败")
                 }
             }
         )
@@ -200,9 +196,9 @@ fun SettingsScreen(
                             scope.launch {
                                 val file = withContext(Dispatchers.IO) { LogExporter.export(context) }
                                 if (file != null && LogExporter.share(context, file)) {
-                                    Toast.makeText(context, "日志已分享", Toast.LENGTH_SHORT).show()
+                                    SnackbarController.show("日志已分享")
                                 } else {
-                                    Toast.makeText(context, "导出日志失败", Toast.LENGTH_SHORT).show()
+                                    SnackbarController.show("导出日志失败")
                                 }
                             }
                         },
@@ -217,11 +213,7 @@ fun SettingsScreen(
                                 val ok = withContext(Dispatchers.IO) {
                                     LogExporter.saveToDownloads(context)
                                 }
-                                Toast.makeText(
-                                    context,
-                                    if (ok) "已保存到下载目录" else "保存失败",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                SnackbarController.show(if (ok) "已保存到下载目录" else "保存失败")
                             }
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -235,11 +227,7 @@ fun SettingsScreen(
                                 val ok = withContext(Dispatchers.IO) {
                                     LogExporter.clearLogcat()
                                 }
-                                Toast.makeText(
-                                    context,
-                                    if (ok) "日志缓存已清空" else "清空失败",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                SnackbarController.show(if (ok) "日志缓存已清空" else "清空失败")
                             }
                         },
                         modifier = Modifier.fillMaxWidth()

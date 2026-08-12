@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -81,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.yunx.app.data.db.DownloadTaskEntity
 import com.yunx.app.data.download.DownloadStats
+import com.yunx.app.ui.SnackbarController
 import com.yunx.app.ui.viewmodel.DownloadViewModel
 import java.io.File
 
@@ -106,7 +106,7 @@ fun DownloadScreen(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) showAddDialog = true
-        else Toast.makeText(context, "需要存储权限才能保存到下载目录", Toast.LENGTH_SHORT).show()
+        else SnackbarController.show("需要存储权限才能保存到下载目录")
     }
     val hasPermission = remember {
         if (needLegacyPermission) {
@@ -630,27 +630,27 @@ private fun openSavedFile(context: android.content.Context, savePath: String) {
     runCatching {
         context.startActivity(Intent.createChooser(intent, "打开文件"))
     }.onFailure {
-        Toast.makeText(context, "无法打开该文件", Toast.LENGTH_SHORT).show()
+        SnackbarController.show("无法打开该文件")
     }
 }
 
 /** 安装 APK：检查「安装未知来源应用」权限（Android 8+），ACTION_VIEW 调起系统安装器 */
 private fun installApk(context: android.content.Context, savePath: String, fileName: String) {
     if (savePath.isBlank()) {
-        Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+        SnackbarController.show("文件不存在")
         return
     }
     // Android 8+：需先授予「安装未知来源应用」
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
         !context.packageManager.canRequestPackageInstalls()
     ) {
-        Toast.makeText(context, "请先允许安装未知来源应用", Toast.LENGTH_SHORT).show()
+        SnackbarController.show("请先允许安装未知来源应用")
         val intent = Intent(
             Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
             Uri.parse("package:${context.packageName}")
         )
         runCatching { context.startActivity(intent) }.onFailure {
-            Toast.makeText(context, "无法打开设置", Toast.LENGTH_SHORT).show()
+            SnackbarController.show("无法打开设置")
         }
         return
     }
@@ -666,7 +666,7 @@ private fun installApk(context: android.content.Context, savePath: String, fileN
     runCatching {
         context.startActivity(Intent.createChooser(intent, "安装应用"))
     }.onFailure {
-        Toast.makeText(context, "无法打开安装器", Toast.LENGTH_SHORT).show()
+        SnackbarController.show("无法打开安装器")
     }
 }
 

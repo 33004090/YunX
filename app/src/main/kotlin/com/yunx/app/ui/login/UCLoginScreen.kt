@@ -6,8 +6,10 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.material3.SnackbarHost
+import com.yunx.app.ui.SnackbarController
+import com.yunx.app.ui.rememberGlobalSnackbarHostState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -107,7 +109,11 @@ fun UCLoginScreen(
     DisposableEffect(Unit) { onDispose { webView.destroy() } }
     BackHandler(enabled = !isSaving && !isSavingManual) { onBack() }
 
+    // 全局 Snackbar 宿主
+    val snackbarHostState = rememberGlobalSnackbarHostState()
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("UC网盘登录", style = MaterialTheme.typography.titleLarge) },
@@ -133,10 +139,10 @@ fun UCLoginScreen(
                                 val saved = viewModel.saveUCAccount(cookie)
                                 isSaving = false
                                 if (saved) {
-                                    Toast.makeText(context, "登录成功", Toast.LENGTH_SHORT).show()
+                                    SnackbarController.show("登录成功")
                                     onSaved()
                                 } else {
-                                    Toast.makeText(context, "未检测到登录态，请先完成登录", Toast.LENGTH_SHORT).show()
+                                    SnackbarController.show("未检测到登录态，请先完成登录")
                                 }
                             }
                         },
@@ -199,11 +205,11 @@ fun UCLoginScreen(
                             val saved = viewModel.saveUCAccount(cookieInput.trim())
                             isSavingManual = false
                             if (saved) {
-                                Toast.makeText(context, "登录成功", Toast.LENGTH_SHORT).show()
+                                SnackbarController.show("登录成功")
                                 showCookieDialog = false
                                 onSaved()
                             } else {
-                                Toast.makeText(context, "Cookie 无效，请检查是否包含 __pus= 与 __puus=", Toast.LENGTH_SHORT).show()
+                                SnackbarController.show("Cookie 无效，请检查是否包含 __pus= 与 __puus=")
                             }
                         }
                     },

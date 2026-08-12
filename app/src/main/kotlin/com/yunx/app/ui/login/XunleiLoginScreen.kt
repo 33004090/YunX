@@ -2,8 +2,9 @@ package com.yunx.app.ui.login
 
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import com.yunx.app.ui.SnackbarController
+import com.yunx.app.ui.rememberGlobalSnackbarHostState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -46,10 +47,10 @@ fun XunleiLoginScreen(
     var smsCode by rememberSaveable { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
 
-    // 登录错误 Toast
+    // 登录错误提示
     LaunchedEffect(error) {
         error?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            SnackbarController.show(it)
             viewModel.consumeLoginError()
         }
     }
@@ -60,7 +61,11 @@ fun XunleiLoginScreen(
 
     BackHandler { onBack() }
 
+    // 全局 Snackbar 宿主
+    val snackbarHostState = rememberGlobalSnackbarHostState()
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("迅雷网盘登录", style = MaterialTheme.typography.titleLarge) },
@@ -148,7 +153,7 @@ fun XunleiLoginScreen(
                 TextButton(
                     onClick = {
                         viewModel.sendSms(username)
-                        Toast.makeText(context, "验证码已发送", Toast.LENGTH_SHORT).show()
+                        SnackbarController.show("验证码已发送")
                     },
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 ) { Text("重新发送验证码") }

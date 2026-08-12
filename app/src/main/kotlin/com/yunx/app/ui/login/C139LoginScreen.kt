@@ -13,8 +13,10 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.material3.SnackbarHost
+import com.yunx.app.ui.SnackbarController
+import com.yunx.app.ui.rememberGlobalSnackbarHostState
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -150,7 +152,7 @@ fun C139LoginScreen(
                     Log.e(TAG, "onRenderProcessGone: didCrash=${detail?.didCrash()} priority=${detail?.rendererPriorityAtExit()}")
                     // 渲染进程崩溃（139 PC 版页面较重/低端机内存不足）：提示并自动重载一次
                     isLoading = false
-                    Toast.makeText(context, "页面加载异常，正在重试…", Toast.LENGTH_SHORT).show()
+                    SnackbarController.show("页面加载异常，正在重试…")
                     view?.post { view.reload() }
                     return true
                 }
@@ -168,7 +170,11 @@ fun C139LoginScreen(
     // 系统返回键 → 返回主页（保存中禁用）
     BackHandler(enabled = !isSaving && !isSavingManual) { onBack() }
 
+    // 全局 Snackbar 宿主
+    val snackbarHostState = rememberGlobalSnackbarHostState()
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("139网盘登录", style = MaterialTheme.typography.titleLarge) },
@@ -198,14 +204,10 @@ fun C139LoginScreen(
                                 val saved = viewModel.saveC139Account(cookie)
                                 isSaving = false
                                 if (saved) {
-                                    Toast.makeText(context, "登录成功", Toast.LENGTH_SHORT).show()
+                                    SnackbarController.show("登录成功")
                                     onSaved()
                                 } else {
-                                    Toast.makeText(
-                                        context,
-                                        "未检测到登录态，请先完成登录",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    SnackbarController.show("未检测到登录态，请先完成登录")
                                 }
                             }
                         },
@@ -311,15 +313,11 @@ fun C139LoginScreen(
                             val saved = viewModel.saveC139Account(cookieInput.trim())
                             isSavingManual = false
                             if (saved) {
-                                Toast.makeText(context, "登录成功", Toast.LENGTH_SHORT).show()
+                                SnackbarController.show("登录成功")
                                 showCookieDialog = false
                                 onSaved()
                             } else {
-                                Toast.makeText(
-                                    context,
-                                    "Cookie 无效，请检查是否包含 Os_SSo_Sid= 与 RMKEY=",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                SnackbarController.show("Cookie 无效，请检查是否包含 Os_SSo_Sid= 与 RMKEY=")
                             }
                         }
                     },

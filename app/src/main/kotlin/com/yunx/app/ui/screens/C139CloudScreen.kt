@@ -1,6 +1,6 @@
 package com.yunx.app.ui.screens
 
-import android.widget.Toast
+import com.yunx.app.ui.SnackbarController
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -104,7 +104,7 @@ fun C139CloudScreen(
 
     LaunchedEffect(viewModel.cloudMessage) {
         viewModel.cloudMessage?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            SnackbarController.show(it)
             viewModel.consumeMessage()
         }
     }

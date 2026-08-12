@@ -3,7 +3,6 @@ package com.yunx.app.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -45,6 +44,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -65,6 +65,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yunx.app.data.network.model.ShareFile
+import com.yunx.app.ui.SnackbarController
+import com.yunx.app.ui.rememberGlobalSnackbarHostState
 import com.yunx.app.ui.resolve.BackToParentItem
 import com.yunx.app.ui.resolve.CrumbBar
 import com.yunx.app.ui.resolve.ShareFileRow
@@ -589,6 +591,8 @@ internal fun ShareResultDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    // Dialog 内提示宿主（AlertDialog 为独立窗口）
+    val snackbarHostState = rememberGlobalSnackbarHostState()
     // 拼接分享文案（按平台区分：UC / 迅雷 / 百度 / 夸克）
     val platformName = when {
         info.shareUrl.contains("uc.cn") -> "UC网盘"
@@ -622,6 +626,8 @@ internal fun ShareResultDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // Dialog 内提示（AlertDialog 为独立窗口，需自带 Snackbar 宿主）
+                SnackbarHost(hostState = snackbarHostState)
             }
         },
         confirmButton = {
@@ -629,7 +635,7 @@ internal fun ShareResultDialog(
                 onClick = {
                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("share_text", shareText))
-                    Toast.makeText(context, "分享文案已复制", Toast.LENGTH_SHORT).show()
+                    SnackbarController.show("分享文案已复制")
                 }
             ) {
                 Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
