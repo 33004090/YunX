@@ -229,6 +229,10 @@ class ResolveViewModel(
     var isBatchWorking by mutableStateOf(false)
         private set
 
+    /** 批量下载进度（如 "2/5"）；null 表示未显示进度 */
+    var batchProgress by mutableStateOf<String?>(null)
+        private set
+
     fun enterMultiSelect(file: ShareFile) {
         multiSelectMode = true
         _selected.clear()
@@ -298,12 +302,13 @@ class ResolveViewModel(
         }
     }
 
-    /** 批量下载：逐个取直链入队（复用 startDownload 的头/UA/CDN 优选逻辑） */
+    /** 批量下载：逐个取直链入队（每取到一个立即后台下载，全部获取完再统一切到下载页） */
     fun batchDownload() {
         val files = _selected.toList()
         val s = session ?: return
         viewModelScope.launch {
             isBatchWorking = true
+            batchProgress = "0/${files.size}"
             try {
                 val credential = currentCredential()
                 if (credential.isNullOrBlank()) {
@@ -311,18 +316,22 @@ class ResolveViewModel(
                     return@launch
                 }
                 var okCount = 0
-                files.forEach { file ->
+                files.forEachIndexed { index, file ->
+                    batchProgress = "${index + 1}/${files.size}"
                     runCatching {
                         currentRepo().getShareDownloadLink(s, file, credential).getOrNull()?.let { link ->
-                            startDownload(link)
+                            enqueueDownload(link, credential)
                             okCount++
                         }
                     }
                 }
                 downloadError = if (okCount > 0) "已加入 $okCount 个下载任务" else "获取下载链接失败"
                 exitMultiSelect()
+                // 全部获取完再一次性切到下载页（避免取到第一个就跳转、其余在后台悄悄进行）
+                if (okCount > 0) downloadStarted = true
             } finally {
                 isBatchWorking = false
+                batchProgress = null
             }
         }
     }
@@ -515,61 +524,69 @@ class ResolveViewModel(
         }
     }
 
-    /** 将直链加入下载队列（携带对应平台凭证与 UA；夸克直链做 CDN 节点优选） */
+    /**
+     * 将直链加入下载队列（携带对应平台凭证与 UA；夸克直链做 CDN 节点优选）。
+     * 不触发切页 —— 与 startDownload 的区别：批量下载全部入队后才统一切到下载页。
+     */
+    private suspend fun enqueueDownload(link: DownloadLink, credential: String) {
+        val isUC = currentPlatform == SharePlatform.UC
+        val isXunlei = currentPlatform == SharePlatform.XUNLEI
+        val isBaidu = currentPlatform == SharePlatform.BAIDU
+        val isC139 = currentPlatform == SharePlatform.C139
+        val isQuark = currentPlatform == SharePlatform.QUARK
+        // 迅雷直链 URL 自带签名，无需 Cookie；夸克/UC/百度需 Cookie + UA；139 直链为 CDN 签名地址
+        val headers = when {
+            isXunlei -> mapOf("User-Agent" to XunleiConstants.WEB_UA)
+            isBaidu -> mapOf(
+                "Cookie" to credential,
+                "User-Agent" to BaiduConstants.UA_NETDISK
+            )
+            isC139 -> mapOf("User-Agent" to C139Constants.PC_UA)
+            // UC：OSS 直链按 Referer 档位限速（缺 Referer 被 Callback 限到 ~100 KB/s），
+            // 补官方 Web 客户端同款 Referer/Origin 即满速
+            isUC -> mapOf(
+                "Cookie" to credential,
+                "User-Agent" to UCConstants.USER_AGENT,
+                "Referer" to UCConstants.DOWNLOAD_REFERER,
+                "Origin" to UCConstants.WEB_ORIGIN
+            )
+            else -> mapOf(
+                "Cookie" to credential,
+                "User-Agent" to QuarkConstants.API_USER_AGENT
+            )
+        }
+        // 夸克直链：并发探测最近 CDN 节点（dl-pc-sz → 就近），失败自动回退原链接
+        val effectiveUrl = if (isQuark) {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                QuarkCdn.fastest(link.downloadUrl, credential)
+            }
+        } else {
+            link.downloadUrl
+        }
+        downloadManager.enqueue(
+            url = effectiveUrl,
+            fileName = link.filename,
+            headers = headers,
+            // 下载成功完成后：清理夸克临时转存子目录（根治 21001；其它平台 cleanupDirFid 为 null 自动跳过）
+            onComplete = {
+                link.cleanupDirFid?.let { dirFid ->
+                    currentRepo().cleanupTempDir(dirFid, credential)
+                }
+            }
+        )
+    }
+
+    /** 将直链加入下载队列（单文件下载：入队后立即切换到下载页） */
     fun startDownload(link: DownloadLink) {
         viewModelScope.launch {
             // 开始下载：先关闭弹窗（临时转存由下载完成 onComplete 清理，不在此时删）
             downloadLink = null
-            val isUC = currentPlatform == SharePlatform.UC
-            val isXunlei = currentPlatform == SharePlatform.XUNLEI
-            val isBaidu = currentPlatform == SharePlatform.BAIDU
-            val isC139 = currentPlatform == SharePlatform.C139
-            val isQuark = currentPlatform == SharePlatform.QUARK
             val credential = currentCredential()
             if (credential.isNullOrBlank()) {
                 downloadError = "请先登录网盘"
                 return@launch
             }
-            // 迅雷直链 URL 自带签名，无需 Cookie；夸克/UC/百度需 Cookie + UA；139 直链为 CDN 签名地址
-            val headers = when {
-                isXunlei -> mapOf("User-Agent" to XunleiConstants.WEB_UA)
-                isBaidu -> mapOf(
-                    "Cookie" to credential,
-                    "User-Agent" to BaiduConstants.UA_NETDISK
-                )
-                isC139 -> mapOf("User-Agent" to C139Constants.PC_UA)
-                // UC：OSS 直链按 Referer 档位限速（缺 Referer 被 Callback 限到 ~100 KB/s），
-                // 补官方 Web 客户端同款 Referer/Origin 即满速
-                isUC -> mapOf(
-                    "Cookie" to credential,
-                    "User-Agent" to UCConstants.USER_AGENT,
-                    "Referer" to UCConstants.DOWNLOAD_REFERER,
-                    "Origin" to UCConstants.WEB_ORIGIN
-                )
-                else -> mapOf(
-                    "Cookie" to credential,
-                    "User-Agent" to QuarkConstants.API_USER_AGENT
-                )
-            }
-            // 夸克直链：并发探测最近 CDN 节点（dl-pc-sz → 就近），失败自动回退原链接
-            val effectiveUrl = if (isQuark) {
-                withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    QuarkCdn.fastest(link.downloadUrl, credential)
-                }
-            } else {
-                link.downloadUrl
-            }
-            downloadManager.enqueue(
-                url = effectiveUrl,
-                fileName = link.filename,
-                headers = headers,
-                // 下载成功完成后：清理夸克临时转存子目录（根治 21001；其它平台 cleanupDirFid 为 null 自动跳过）
-                onComplete = {
-                    link.cleanupDirFid?.let { dirFid ->
-                        currentRepo().cleanupTempDir(dirFid, credential)
-                    }
-                }
-            )
+            enqueueDownload(link, credential)
             downloadStarted = true
         }
     }

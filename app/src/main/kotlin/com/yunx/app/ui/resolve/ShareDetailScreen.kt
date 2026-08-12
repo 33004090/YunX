@@ -233,12 +233,12 @@ fun ShareDetailScreen(
         }
     }
 
-    // 批量处理中：加载弹窗
+    // 批量处理中：加载弹窗（批量下载显示获取进度，如 "正在获取下载链接 2/5"）
     if (viewModel.isBatchWorking) {
         AlertDialog(
             onDismissRequest = { },
             confirmButton = { },
-            title = { Text("处理中") },
+            title = { Text("批量处理中") },
             text = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
@@ -246,7 +246,11 @@ fun ShareDetailScreen(
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("正在批量处理，请稍候…", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = viewModel.batchProgress?.let { "正在获取下载链接 $it" }
+                            ?: "正在批量处理，请稍候…",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
             }
         )
