@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Delete
@@ -70,6 +71,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -312,21 +314,22 @@ private fun FolderDownloadGroup(
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
                     .padding(
-                        start = 14.dp, end = 14.dp, top = 14.dp,
-                        bottom = if (expanded) 6.dp else 12.dp
+                        start = 14.dp, end = 12.dp, top = 12.dp,
+                        bottom = 10.dp
                     ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // 文件夹图标（圆角方块）
                 Surface(
-                    modifier = Modifier.size(40.dp),
-                    shape = CircleShape,
+                    modifier = Modifier.size(42.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Outlined.Folder,
                             contentDescription = null,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(22.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
@@ -342,11 +345,33 @@ private fun FolderDownloadGroup(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "${completed}/${tasks.size} 已完成 · ${formatSize(downloaded)} / ${formatSize(totalSize)}",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "${completed}/${tasks.size} 个文件 · ${formatSize(downloaded)} / ${formatSize(totalSize)}",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                // 总体进度百分比徽标
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (completed == tasks.size) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHighest
+                    }
+                ) {
+                    Text(
+                        text = if (completed == tasks.size) "已完成" else "${(fraction * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (completed == tasks.size) {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
                 Icon(
                     imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                     contentDescription = if (expanded) "收起" else "展开",
@@ -354,41 +379,38 @@ private fun FolderDownloadGroup(
                 )
             }
 
-            // 总体进度条：仅展开时显示（收缩时隐藏，保持卡片简洁）
+            // 展开区：总进度条 + 子任务列表（同一 AnimatedVisibility，动画完全同步不卡顿）
             AnimatedVisibility(
                 visible = expanded,
-                enter = fadeIn(tween(200)) + expandVertically(expandFrom = Alignment.Top),
-                exit = fadeOut(tween(150)) + shrinkVertically(shrinkTowards = Alignment.Top)
+                enter = fadeIn(tween(200)) + expandVertically(tween(200), expandFrom = Alignment.Top),
+                exit = fadeOut(tween(150)) + shrinkVertically(tween(150), shrinkTowards = Alignment.Top)
             ) {
-                LinearProgressIndicator(
-                    progress = { fraction },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp)
-                        .padding(bottom = 6.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                )
-            }
-
-            // 展开的子任务列表（淡入 + 纵向展开）
-            AnimatedVisibility(
-                visible = expanded,
-                enter = fadeIn(tween(180)) + expandVertically(tween(180)),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(140))
-            ) {
-                Column(
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    tasks.forEach { task ->
-                        DownloadTaskCard(
-                            task = task,
-                            stats = stats[task.id],
-                            onPause = { onPause(task.id) },
-                            onResume = { onResume(task.id) },
-                            onRemove = { onRemove(task) }
-                        )
+                Column {
+                    // 总体进度条（细条 4dp，圆角）
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp)),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                    )
+                    // 子任务列表
+                    Column(
+                        modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        tasks.forEach { task ->
+                            DownloadTaskCard(
+                                task = task,
+                                stats = stats[task.id],
+                                onPause = { onPause(task.id) },
+                                onResume = { onResume(task.id) },
+                                onRemove = { onRemove(task) }
+                            )
+                        }
                     }
                 }
             }

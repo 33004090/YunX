@@ -163,7 +163,10 @@ fun XunleiCloudScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .nestedScroll(scrollBehavior.nestedScrollConnection),
-                            contentPadding = PaddingValues(16.dp),
+                            contentPadding = PaddingValues(
+                                start = 16.dp, end = 16.dp, top = 16.dp,
+                                bottom = if (viewModel.multiSelectMode) 96.dp else 16.dp
+                            ),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             item {
