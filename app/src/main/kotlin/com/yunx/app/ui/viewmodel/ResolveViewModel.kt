@@ -583,7 +583,7 @@ class ResolveViewModel(
         val isQuark = currentPlatform == SharePlatform.QUARK
         // 迅雷直链 URL 自带签名，无需 Cookie；夸克/UC/百度需 Cookie + UA；139 直链为 CDN 签名地址
         val headers = when {
-            isXunlei -> mapOf("User-Agent" to XunleiConstants.WEB_UA)
+            isXunlei -> mapOf("User-Agent" to XunleiConstants.APP_UA) // 迅雷直链必须用官方 app UA，浏览器 UA 会触发 CDN 降级（200整文件）
             isBaidu -> mapOf(
                 "Cookie" to credential,
                 "User-Agent" to BaiduConstants.UA_NETDISK

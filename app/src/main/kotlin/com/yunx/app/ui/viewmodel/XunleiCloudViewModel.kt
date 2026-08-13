@@ -209,9 +209,9 @@ class XunleiCloudViewModel(
 
     // ---------- 单文件操作 ----------
 
-    /** 迅雷下载直链的请求头（签名 URL，仅需 UA） */
+    /** 迅雷下载直链的请求头（签名 URL；UA 必须用官方 app UA，浏览器 UA 会触发 CDN 降级为 200 整文件） */
     private fun downloadHeaders(): Map<String, String> = mapOf(
-        "User-Agent" to XunleiConstants.WEB_UA
+        "User-Agent" to XunleiConstants.APP_UA
     )
 
     /**
@@ -288,7 +288,7 @@ class XunleiCloudViewModel(
                     url = link.downloadUrl,
                     fileName = link.filename.ifBlank { file.fname },
                     size = link.size,
-                    headers = mapOf("User-Agent" to XunleiConstants.WEB_UA)
+                    headers = mapOf("User-Agent" to XunleiConstants.APP_UA)
                 )
                 cloudMessage = "已加入下载：${link.filename.ifBlank { file.fname }}"
                 actionFile = null

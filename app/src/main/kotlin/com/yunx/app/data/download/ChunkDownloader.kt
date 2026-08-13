@@ -11,8 +11,6 @@ import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
@@ -21,35 +19,38 @@ import kotlin.math.min
 
 private const val TAG = "YunX-DL"
 
-/** 分片下载单次失败后的重试次数（瞬时 IO 抖动自动恢复，结构性失败不重试） */
+/** 分片下载单次失败后的瞬时 IO 重试次数 */
 private const val CHUNK_RETRIES = 3
-
-/** 网络读缓冲：256KB，降低大文件下载的 syscall 次数 */
+/** 当服务器忽略 Range（返回 200 整文件）时，对单分片重试 Range 的次数（指数退避后重发，CDN 负载下降后常能拿到 206） */
+private const val RANGE_RETRIES = 4
+/** 网络读缓冲：256KB */
 private const val BUFFER_SIZE = 256 * 1024
 
 /**
+ * 分片下载结果（结构化）：
+ * - OK            : 该分片已正确写入「预期字节数」；
+ * - RANGE_IGNORED : 服务器忽略 Range（返回 200 整文件）——上层应回退单流整文件，**绝不为单分片下载整文件**；
+ * - FAILED        : 结构性失败（非 206/200、HTML 广告页、写入字节数不足等）。
+ */
+enum class ChunkResult { OK, RANGE_IGNORED, FAILED }
+
+/**
  * OkHttp 分片下载器：
- * - 支持 Range 分片请求、多线程并行下载；
- * - 断点续传：part 文件已存在部分时从已有大小继续；
- * - 分片完成后按顺序合并为完整文件；
- * - 任务级取消：每个任务的 OkHttp Call 统一登记，暂停/删除时主动 cancel() 立即中断阻塞 IO。
+ * - Range 分片 + 多线程并行 + 断点续传；
+ * - 服务器忽略 Range（200 整文件）时**不下载整文件**，交由上层回退单流；
+ * - 写入后严格校验「已写字节 == 预期字节」，杜绝空洞文件（损坏）；
+ * - 任务级取消：每个任务 OkHttp Call 统一登记，暂停/删除时主动 cancel() 立即中断阻塞 IO。
  */
 class ChunkDownloader(private val client: OkHttpClient) {
 
-    /** 任务 id → 该任务当前所有分片请求（供暂停/删除时立即中断网络） */
+    /** 任务 id → 该任务当前所有分片请求 */
     private val activeCalls = ConcurrentHashMap<Long, MutableSet<Call>>()
-    /** 取消指定任务的所有分片请求（立即中断阻塞 IO，不依赖协程取消传播） */
     fun cancelCalls(taskId: Long) {
-        activeCalls.remove(taskId)?.forEach { call ->
-            runCatching { call.cancel() }
-        }
+        activeCalls.remove(taskId)?.forEach { call -> runCatching { call.cancel() } }
     }
 
-    /**
-     * 获取文件总大小：先试 Range: bytes=0-0（解析 Content-Range），
-     * 失败后再试无 Range 的 GET（读 Content-Length；部分 CDN 忽略 Range 返回 200 全量）。
-     * @return 总字节数；无法获取时返回 null
-     */
+    // ---------- 总大小探测 ----------
+
     suspend fun getTotalSize(url: String, headers: Map<String, String>): Long? = withContext(Dispatchers.IO) {
         val withRange = probeSize(url, headers, withRange = true)
         if (withRange != null) return@withContext withRange
@@ -64,8 +65,7 @@ class ChunkDownloader(private val client: OkHttpClient) {
                     if (withRange) header("Range", "bytes=0-0")
                     headers.forEach { (k, v) -> header(k, v) }
                 }
-                .get()
-                .build()
+                .get().build()
             val call = client.newCall(request)
             val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
             try {
@@ -73,24 +73,22 @@ class ChunkDownloader(private val client: OkHttpClient) {
                     call.execute().use { response ->
                         Log.d(TAG, "getTotalSize: range=$withRange code=${response.code} url=${url.take(120)}")
                         if (!response.isSuccessful) return@use null
-                        // Content-Range: bytes 0-0/123456
                         response.header("Content-Range")
-                            ?.substringAfter('/')
-                            ?.toLongOrNull()
+                            ?.substringAfter('/')?.toLongOrNull()
                             ?: response.header("Content-Length")?.toLongOrNull()
                     }
                 }.getOrNull()
-            } finally {
-                cancelHandle?.dispose()
-            }
+            } finally { cancelHandle?.dispose() }
         }
 
+    // ---------- 分片下载 ----------
+
     /**
-     * 下载一个分片到 partFile（断点续传：从 partFile 已有大小继续）。
-     * - 瞬时 IO 异常（弱网抖动）自动重试（指数退避），结构性失败（非 206 等）不重试；
-     * - 每轮重试都基于 partFile 当前大小续传，已下载数据不丢弃。
-     * @param onBytes 每读到一段数据回调新增字节数（用于进度上报）
-     * @return 是否成功
+     * 下载一个分片到 partFile（断点续传）。
+     * - 瞬时 IO 异常：指数退避重试（CHUNK_RETRIES）；
+     * - 服务器忽略 Range（RANGE_IGNORED）：退避后重发 Range 至多 RANGE_RETRIES 次，仍被忽略则返回
+     *   RANGE_IGNORED 交由 DownloadManager 回退单流整文件（**全程不下载整文件**）；
+     * - 写入后校验「已写字节 == 预期字节」，不足按失败处理（避免空洞文件 = 损坏）。
      */
     suspend fun downloadChunk(
         taskId: Long,
@@ -100,46 +98,47 @@ class ChunkDownloader(private val client: OkHttpClient) {
         partFile: File,
         headers: Map<String, String>,
         onBytes: suspend (Long) -> Unit
-    ): Boolean = withContext(Dispatchers.IO) {
-        var lastError: IOException? = null
-        repeat(CHUNK_RETRIES) { attempt ->
-            // 协程已被取消（暂停/删除）：立即传播，不再重试
-            if (!isActive) throw CancellationException("下载被取消", lastError)
-            // 每轮重试重新读取 part 大小：断点续传，已下载部分不重下
+    ): ChunkResult = withContext(Dispatchers.IO) {
+        var lastWasRangeIgnored = false
+        val attempts = CHUNK_RETRIES + RANGE_RETRIES
+        repeat(attempts) { attempt ->
+            if (!isActive) throw CancellationException("下载被取消")
             val existing = partFile.length()
             val from = start + existing
-            // end == Long.MAX_VALUE 表示总大小未知：用开放区间 Range（bytes=from-），读到 EOF
             val unknownTotal = end == Long.MAX_VALUE
-            val total = if (unknownTotal) -1L else end - start + 1
-            // 分片已完整下载
-            if (!unknownTotal && existing >= total) return@withContext true
-            Log.d(TAG, "downloadChunk: task=$taskId 尝试${attempt + 1}/$CHUNK_RETRIES range=$from-${if (unknownTotal) "EOF" else end} 已有=$existing")
+            val expected = if (unknownTotal) -1L else end - start + 1
+            // 分片已完整（含断点续传）：直接成功
+            if (!unknownTotal && existing >= expected) return@withContext ChunkResult.OK
 
-            val result = try {
+            val res = try {
                 doChunkAttempt(taskId, url, from, end, unknownTotal, partFile, headers, existing, onBytes)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: IOException) {
-                lastError = e
                 Log.w(TAG, "downloadChunk: task=$taskId 尝试${attempt + 1} IO异常: ${e.message}")
                 if (!isActive) throw CancellationException("下载被取消", e)
-                null // 瞬时 IO 异常 → 重试
+                null
             }
-            when (result) {
-                true -> return@withContext true
-                false -> return@withContext false // 结构性失败（非 206 / body 空等），不重试
+
+            when (res) {
+                ChunkResult.OK -> return@withContext ChunkResult.OK
+                ChunkResult.FAILED -> return@withContext ChunkResult.FAILED
+                ChunkResult.RANGE_IGNORED -> {
+                    lastWasRangeIgnored = true
+                    // 指数退避后重发 Range（不要下载整文件）：400ms → 800ms → 1600ms → 2000ms(封顶)
+                    val backoff = (400L * (1 shl attempt)).coerceAtMost(2000L)
+                    delay(backoff)
+                }
                 null -> {
-                    // 指数退避后重试
-                    if (attempt < CHUNK_RETRIES - 1) {
-                        delay((500L * (attempt + 1)).coerceAtMost(3000))
-                    }
+                    if (attempt < attempts - 1) delay((500L * (attempt + 1)).coerceAtMost(3000))
                 }
             }
         }
-        false
+        // 重试耗尽：若最后是「忽略 Range」则返回 RANGE_IGNORED 让上层回退单流，否则失败
+        if (lastWasRangeIgnored) ChunkResult.RANGE_IGNORED else ChunkResult.FAILED
     }
 
-    /** 单次分片请求（不重试）：成功返回 true；请求完成但失败（非 206 等结构性原因）返回 false；IO 异常向上抛出 */
+    /** 单次分片请求（不重试）：成功/忽略Range/失败 三态；IO 异常向外抛出 */
     private suspend fun doChunkAttempt(
         taskId: Long,
         url: String,
@@ -150,85 +149,47 @@ class ChunkDownloader(private val client: OkHttpClient) {
         headers: Map<String, String>,
         existing: Long,
         onBytes: suspend (Long) -> Unit
-    ): Boolean {
+    ): ChunkResult {
         val request = Request.Builder()
             .url(url)
             .header("Range", if (unknownTotal) "bytes=$from-" else "bytes=$from-$end")
             .apply { headers.forEach { (k, v) -> header(k, v) } }
-            .get()
-            .build()
+            .get().build()
 
         val call = client.newCall(request)
-        // 登记到任务级集合：暂停/删除时 DownloadManager 主动 cancelCalls() 立即中断阻塞 IO
         activeCalls.getOrPut(taskId) { ConcurrentHashMap.newKeySet() }.add(call)
-        // 协程取消（暂停/删除）时也立即中断网络请求（双保险）
         val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
         try {
             return call.execute().use { response ->
-                val code = response.code
-                // 防盗链/广告回退检测：HTML 页面直接终止
-                val contentType = response.header("Content-Type").orEmpty()
-                if (contentType.contains("text/html", ignoreCase = true)) {
+                // 防盗链/广告回退页：直接判失败
+                if (response.header("Content-Type").orEmpty().contains("text/html", ignoreCase = true)) {
                     Log.w(TAG, "downloadChunk: task=$taskId 返回 text/html（疑似广告/错误页），终止")
-                    return@use false
+                    return@use ChunkResult.FAILED
                 }
-                val body = response.body ?: return@use false
-
-                // ★ 识别三种合法响应：
-                //   206 = 标准 Range 分片响应
-                //   200 + from==0 = 服务器忽略 Range，首片从 0 开始（原逻辑已支持）
-                //   200 + from>0  = CDN 降级返回整文件（迅雷离线节点高并发时常见），
-                //                   从 body 中跳过 [0, from) 字节，截取 [from, end] 写入
-                val isFullBody = code == 200
-                if (code != 206 && !isFullBody) {
-                    Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end 非预期状态码 $code")
-                    return@use false
-                }
-                if (isFullBody && from > 0L) {
-                    Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end 服务器返回200整文件(CDN降级)，截取目标区间")
-                }
-
-                RandomAccessFile(partFile, "rw").use { raf ->
-                    raf.seek(existing)
-                    body.byteStream().use { input ->
-                        // ★ 200 整文件响应：先跳过 [0, from) 字节，再读取目标区间
-                        if (isFullBody && from > 0L) {
-                            var skipRemaining = from
-                            while (skipRemaining > 0) {
-                                val skipped = input.skip(skipRemaining)
-                                if (skipped <= 0) {
-                                    // skip 可能因流式传输返回 0，用 read 兜底
-                                    val buf = ByteArray(BUFFER_SIZE)
-                                    while (skipRemaining > 0) {
-                                        val need = min(buf.size.toLong(), skipRemaining).toInt()
-                                        val read = input.read(buf, 0, need)
-                                        if (read <= 0) break
-                                        skipRemaining -= read
-                                    }
-                                    break
-                                }
-                                skipRemaining -= skipped
-                            }
-                        }
-                        val buffer = ByteArray(BUFFER_SIZE)
-                        // 本轮预期写入 = 区间 [from, end] 大小（不含已有部分）；未知总大小时不限制（读到 EOF）
+                when (val code = response.code) {
+                    206 -> {
+                        val body = response.body ?: return@use ChunkResult.FAILED
                         val expected = if (unknownTotal) -1L else end - from + 1
-                        var written = 0L
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            // 服务器可能忽略 end 返回超量 body：严格截断到预期区间，避免文件膨胀损坏
-                            val allow = if (expected < 0) read.toLong()
-                            else min(read.toLong(), expected - written)
-                            if (allow <= 0) break
-                            raf.write(buffer, 0, allow.toInt())
-                            written += allow
-                            onBytes(allow)
-                            if (expected >= 0 && written >= expected) break // 已写满预期区间
+                        // 写入分片，严格截断到预期区间
+                        val written = writeSlice(body.byteStream(), partFile, existing, expected, onBytes)
+                        // ★ 校验：206 也必须写满预期字节，否则视为失败（防空洞/损坏）
+                        if (!unknownTotal && written != expected) {
+                            Log.w(TAG, "downloadChunk: task=$taskId 分片写入不足 written=$written 预期=$expected")
+                            return@use ChunkResult.FAILED
                         }
+                        ChunkResult.OK
+                    }
+                    200 -> {
+                        // ★ 服务器忽略 Range，回送整文件：绝不为单分片下载整文件！
+                        //   立即丢弃响应，交由上层回退单条整文件流（只下一次）。
+                        Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end 服务器忽略Range返回200整文件 → 触发回退单流")
+                        ChunkResult.RANGE_IGNORED
+                    }
+                    else -> {
+                        Log.w(TAG, "downloadChunk: task=$taskId 非预期状态码 $code")
+                        ChunkResult.FAILED
                     }
                 }
-                true
             }
         } finally {
             activeCalls[taskId]?.remove(call)
@@ -236,7 +197,35 @@ class ChunkDownloader(private val client: OkHttpClient) {
         }
     }
 
-    /** 无 Range 完整下载（回退：部分 CDN 拒绝 Range 请求时使用），读到 EOF */
+    /** 把响应流写入 partFile（seek 到 existing），截断到 expected 字节；返回实际写入字节数 */
+    private suspend fun writeSlice(
+        input: java.io.InputStream,
+        partFile: File,
+        existing: Long,
+        expected: Long,
+        onBytes: suspend (Long) -> Unit
+    ): Long {
+        var written = 0L
+        RandomAccessFile(partFile, "rw").use { raf ->
+            raf.seek(existing)
+            val buffer = ByteArray(BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                // 服务器可能忽略 end 返回超量 body：严格截断，避免文件膨胀
+                val allow = if (expected < 0) read.toLong() else min(read.toLong(), expected - written)
+                if (allow <= 0) break
+                raf.write(buffer, 0, allow.toInt())
+                written += allow
+                onBytes(allow)
+                if (expected >= 0 && written >= expected) break
+            }
+        }
+        return written
+    }
+
+    // ---------- 单流整文件（回退） ----------
+
     suspend fun downloadFull(
         taskId: Long,
         url: String,
@@ -249,17 +238,13 @@ class ChunkDownloader(private val client: OkHttpClient) {
         val request = Request.Builder()
             .url(url)
             .apply { headers.forEach { (k, v) -> header(k, v) } }
-            .get()
-            .build()
+            .get().build()
         val call = client.newCall(request)
         activeCalls.getOrPut(taskId) { ConcurrentHashMap.newKeySet() }.add(call)
         val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
         try {
             call.execute().use { response ->
-                if (!response.isSuccessful) {
-                    // 抛带状态码的异常（不被 catch(IOException) 吞掉），让任务失败信息可见真实 HTTP 码
-                    throw IllegalStateException("下载失败 HTTP ${response.code}")
-                }
+                if (!response.isSuccessful) throw IllegalStateException("下载失败 HTTP ${response.code}")
                 val body = response.body ?: return@use false
                 RandomAccessFile(partFile, "rw").use { raf ->
                     raf.seek(existing)
@@ -289,14 +274,14 @@ class ChunkDownloader(private val client: OkHttpClient) {
         }
     }
 
-    /** 按顺序合并分片为完整文件（FileChannel.transferTo 零拷贝，替代 8KB copyTo） */
+    /** 按顺序合并分片为完整文件（零拷贝） */
     suspend fun mergeChunks(chunkFiles: List<File>, target: File): Boolean = withContext(Dispatchers.IO) {
         val ok = runCatching {
             target.parentFile?.mkdirs()
-            FileOutputStream(target).use { fos ->
+            java.io.FileOutputStream(target).use { fos ->
                 fos.channel.use { out ->
                     chunkFiles.forEach { part ->
-                        FileInputStream(part).use { fis ->
+                        java.io.FileInputStream(part).use { fis ->
                             fis.channel.use { inCh ->
                                 var pos = 0L
                                 val size = inCh.size()

@@ -27,6 +27,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 import kotlin.math.ceil
@@ -40,6 +42,15 @@ data class DownloadStats(
 )
 
 private const val TAG = "YunX-DL"
+
+/** 单文件 Range 分片的安全并发上限。迅雷等 CDN 对单文件并发 Range 有阈值，
+ *  超过约 8 个并发会把多余请求降级为 200 整文件（忽略 Range），
+ *  进而触发整任务回退单流、速度暴跌。压在安全上限内，所有分片都能稳定拿到 206。 */
+private const val RANGE_WORKERS_CAP = 8
+
+/** 错峰建连上限（序号）：第 i 个分片首次请求前延迟 (min(i, STAGGER_CAP) * STAGGER_MS) */
+private const val STAGGER_CAP = 8
+private const val STAGGER_MS = 25L
 
 /**
  * 下载任务管理器：
@@ -283,10 +294,19 @@ class DownloadManager(
         val chunkCount = chunkCountFor(total, threadCount)
         val chunkSize = ceil(total.toDouble() / chunkCount).toLong()
         val chunkDir = chunkDirOf(id).apply { mkdirs() }
-        Log.d(TAG, "分片规划: id=$id chunks=$chunkCount size=$chunkSize threads=$threadCount")
+        // 有效并发：仅迅雷（CDN 对单文件并发 Range 有阈值，约 8 个，超过会降级 200 整文件）封顶安全上限；
+        // 其他平台保持用户设置的线程数（满并发）
+        val isXunlei = headers["User-Agent"]?.contains("xunlei", ignoreCase = true) == true ||
+            task.url.contains("xunlei", ignoreCase = true)
+        val effectiveWorkers = if (isXunlei) {
+            min(threadCount, RANGE_WORKERS_CAP).coerceAtLeast(1)
+        } else {
+            threadCount.coerceAtLeast(1)
+        }
+        Log.d(TAG, "分片规划: id=$id chunks=$chunkCount size=$chunkSize threads=$threadCount effectiveWorkers=$effectiveWorkers isXunlei=$isXunlei")
 
-        // 注册实时统计：线程数 = 用户设置的线程数（非分片数）
-        _stats.update { it + (id to DownloadStats(0L, -1L, threadCount)) }
+        // 注册实时统计：线程数 = 有效并发（受安全上限约束）
+        _stats.update { it + (id to DownloadStats(0L, -1L, effectiveWorkers)) }
 
         // 统计已有 part 大小（断点续传起点）
         val downloaded = AtomicLong(0)
@@ -297,70 +317,87 @@ class DownloadManager(
 
         val lastUpdate = AtomicLong(downloaded.get())
         val speedRecorder = SpeedRecorder()
-        val semaphore = Semaphore(threadCount)
-        // 记录第一个失败分片的具体原因
-        val failedReason = java.util.concurrent.atomic.AtomicReference<String?>(null)
+
+        // ---------- 渐进并发 worker 池 ----------
+        // 先用 RAMP_START 个连接，每完成一片 +1，直到 min(threadCount, MAX_WORKERS)。
+        // 避免瞬间打出 N 个连接触发 CDN 降级（这是「像单线程」的根因之一）。
+        val results = arrayOfNulls<ChunkResult?>(chunkCount)
+        val nextIdx = AtomicInteger(0)
+        val fallback = AtomicBoolean(false)              // 任一分片检测到「服务器忽略 Range」→ 整任务回退单流
+        val failReason = java.util.concurrent.atomic.AtomicReference<String?>(null)
+
+        // ★ 固定容量信号量：容量 = effectiveWorkers，绝不手动 release，杜绝溢出崩溃
+        val sem = Semaphore(effectiveWorkers)
 
         val allOk = coroutineScope {
-            val results = (0 until chunkCount).map { i ->
+            val workers = List(min(effectiveWorkers, chunkCount)) {
                 async(Dispatchers.IO) {
-                    // ★ 错峰：每批分片间隔 10ms 启动，避免瞬间打满连接触发 CDN 降级
-                    //（迅雷离线节点高并发时部分 Range 会被降级为 200 整文件）
-                    delay((i / threadCount) * 10L)
-                    semaphore.withPermit {
-                        val start = i * chunkSize
-                        val end = min(start + chunkSize - 1, total - 1)
-                        try {
-                            val ok = downloader.downloadChunk(
-                                taskId = id,
-                                url = task.url,
-                                start = start,
-                                end = end,
-                                partFile = File(chunkDir, "part_$i"),
-                                headers = headers
-                            ) { bytes ->
-                                val new = downloaded.addAndGet(bytes)
-                                // 暂停/删除已触发取消：跳过进度上报与状态更新，
-                                // 避免把 PAUSED 覆盖回 DOWNLOADING（"暂停后闪一下又开始了"）
-                                if (!isTaskActive()) return@downloadChunk
-                                // 速度/剩余时间统计（每 500ms 更新一次）
-                                speedRecorder.onBytes(new)?.let { speed ->
-                                    val remain = if (speed > 0) (total - new) * 1000 / speed else -1L
-                                    _stats.update { it + (id to DownloadStats(speed, remain, threadCount)) }
-                                }
-                                // 前台通知进度（2 秒节流）
-                                notifyProgress(task.fileName, new, total)
-                                val last = lastUpdate.get()
-                                if (new - last >= progressThrottle || new >= total) {
-                                    if (lastUpdate.compareAndSet(last, new)) {
-                                        dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
+                    while (true) {
+                        if (fallback.get()) break
+                        val i = nextIdx.getAndIncrement()
+                        if (i >= chunkCount) break
+                        // 错峰建连：首请求前按序号微延迟，平摊 TCP/TLS 突发（仅影响首请求，不影响稳态并发）
+                        if (i > 0) delay(min(i.toLong(), STAGGER_CAP.toLong()) * STAGGER_MS)
+                        sem.withPermit {
+                            if (fallback.get()) return@withPermit
+                            val start = i * chunkSize
+                            val end = min(start + chunkSize - 1, total - 1)
+                            val res = try {
+                                downloader.downloadChunk(
+                                    taskId = id, url = task.url, start = start, end = end,
+                                    partFile = File(chunkDir, "part_$i"), headers = headers
+                                ) { bytes ->
+                                    val new = downloaded.addAndGet(bytes)
+                                    if (!isTaskActive()) return@downloadChunk
+                                    speedRecorder.onBytes(new)?.let { speed ->
+                                        val remain = if (speed > 0) (total - new) * 1000 / speed else -1L
+                                        _stats.update { it + (id to DownloadStats(speed, remain, effectiveWorkers)) }
+                                    }
+                                    notifyProgress(task.fileName, new, total)
+                                    val last = lastUpdate.get()
+                                    if (new - last >= progressThrottle || new >= total) {
+                                        if (lastUpdate.compareAndSet(last, new)) {
+                                            dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
+                                        }
                                     }
                                 }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                failReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount：${e.message ?: e.javaClass.simpleName}")
+                                ChunkResult.FAILED
                             }
-                            // 分片失败原因补全（downloadChunk 返回 false 不带原因，这里记录便于排查）
-                            if (!ok) {
-                                failedReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount 下载失败（非206/网络异常）")
+                            results[i] = res
+                            when (res) {
+                                ChunkResult.RANGE_IGNORED -> {
+                                    // 触发整任务回退单流（其他 worker 会在下一轮循环退出）
+                                    fallback.compareAndSet(false, true)
+                                    Log.w(TAG, "runTask: id=$id 分片${i + 1} 检测到服务器忽略Range，准备回退单流")
+                                }
+                                ChunkResult.FAILED -> failReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount 下载失败")
+                                else -> {}
                             }
-                            ok
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            failedReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount：${e.message ?: e.javaClass.simpleName}")
-                            false
                         }
                     }
                 }
-            }.awaitAll()
-            results.all { it }
+            }
+            workers.awaitAll()
+            !fallback.get() && results.all { it == ChunkResult.OK }
+        }
+
+        // ---------- 三种结局 ----------
+        if (fallback.get()) {
+            // 服务器忽略 Range：回退单条整文件流（只下一次，不按分片重复下载整文件）
+            Log.w(TAG, "runTask: id=$id 回退单流整文件下载（避免重复下载整文件）")
+            singleStreamFallback(id, task, headers, total, chunkDir, failReason)
+            return
         }
         if (!allOk) {
-            Log.e(TAG, "runTask: id=$id 部分分片失败 reason=${failedReason.get()}，开始重试失败分片")
-            // ★ 不删盘：保留已成功分片，只重试失败的（串行，降并发避免再次触发 CDN 降级）
+            Log.e(TAG, "runTask: id=$id 部分分片失败 reason=${failReason.get()}，串行断点续传重试")
             val retryOk = (0 until chunkCount).all { i ->
                 val partFile = File(chunkDir, "part_$i")
                 val start = i * chunkSize
                 val end = min(start + chunkSize - 1, total - 1)
-                // 已完整的分片跳过（downloadChunk 内部会判断 existing >= total 直接返回 true）
                 if (partFile.length() >= (end - start + 1)) true
                 else {
                     val ok = downloader.downloadChunk(
@@ -370,43 +407,52 @@ class DownloadManager(
                         val new = downloaded.addAndGet(bytes)
                         if (!isTaskActive()) return@downloadChunk
                         dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
-                        // 前台通知进度（2 秒节流）
                         notifyProgress(task.fileName, new, total)
                     }
-                    if (!ok) failedReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount 重试仍失败")
-                    ok
+                    if (ok != ChunkResult.OK) failReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount 重试仍失败")
+                    ok == ChunkResult.OK
                 }
             }
             if (retryOk) {
-                Log.d(TAG, "runTask: id=$id 重试后所有分片完成，开始合并")
-                finishDownload(id, chunkDir, (0 until chunkCount).map { File(chunkDir, "part_$it") }, task.fileName)
+                Log.d(TAG, "runTask: id=$id 重试用完所有分片，开始合并")
+                finishDownload(id, chunkDir, chunkParts(chunkCount, chunkDir), task.fileName, total)
                 return
             }
-            // 重试仍失败：回退单连接整文件下载（不删盘，downloadFull 会从 part_0 已有大小续传）
-            Log.w(TAG, "runTask: id=$id 分片重试失败，回退单连接整文件下载")
-            val fullPart = File(chunkDir, "part_0")
-            // ★ 不 deleteRecursively：保留可能已部分下载的 part_0，断点续传
-            val fullDownloaded = AtomicLong(downloaded.get())
-            val fullOk = downloader.downloadFull(
-                taskId = id,
-                url = task.url,
-                partFile = fullPart,
-                headers = headers
-            ) { bytes ->
-                val new = fullDownloaded.addAndGet(bytes)
-                if (!isTaskActive()) return@downloadFull
-                dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
-                // 前台通知进度（2 秒节流）
-                notifyProgress(task.fileName, new, total)
-            }
-            if (fullOk) {
-                finishDownload(id, chunkDir, listOf(fullPart), task.fileName)
-                return
-            }
-            throw IllegalStateException(failedReason.get() ?: "分片下载失败")
+            // 重试仍失败：回退单流
+            Log.w(TAG, "runTask: id=$id 分片重试失败，回退单流整文件下载")
+            singleStreamFallback(id, task, headers, total, chunkDir, failReason)
+            return
         }
-        Log.d(TAG, "runTask: id=$id 所有分片下载完成，开始合并")
-        finishDownload(id, chunkDir, (0 until chunkCount).map { File(chunkDir, "part_$it") }, task.fileName)
+        Log.d(TAG, "runTask: id=$id 所有分片完成，开始合并")
+        finishDownload(id, chunkDir, chunkParts(chunkCount, chunkDir), task.fileName, total)
+    }
+
+    /** 分片 part 文件列表（按序） */
+    private fun chunkParts(chunkCount: Int, chunkDir: File): List<File> =
+        (0 until chunkCount).map { File(chunkDir, "part_$it") }
+
+    /**
+     * 回退：单条整文件流下载（服务器忽略 Range 时）。
+     * 写入**独立**的 full_single.bin（从 0 开始），不复用 part_0，避免与已下分片错位/重复。
+     */
+    private suspend fun singleStreamFallback(
+        id: Long,
+        task: DownloadTaskEntity,
+        headers: Map<String, String>,
+        total: Long,
+        chunkDir: File,
+        failReason: java.util.concurrent.atomic.AtomicReference<String?>
+    ) {
+        val fullFile = File(chunkDir, "full_single.bin").apply { delete() } // 全新整文件，从 0 开始
+        val fullDownloaded = AtomicLong(0)
+        val ok = downloader.downloadFull(id, task.url, fullFile, headers) { bytes ->
+            val new = fullDownloaded.addAndGet(bytes)
+            if (!isTaskActive()) return@downloadFull
+            dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
+            notifyProgress(task.fileName, new, total)
+        }
+        if (!ok) throw IllegalStateException(failReason.get() ?: "分片与单流下载均失败")
+        finishDownload(id, chunkDir, listOf(fullFile), task.fileName, total)
     }
 
     /** 流式降级下载：总大小未知时单分片开放区间下载（Range: bytes=from-），读到 EOF */
@@ -433,8 +479,8 @@ class DownloadManager(
             // 前台通知进度（2 秒节流，total 未知时仅更新标题）
             notifyProgress(task.fileName, new, 0)
         }
-        if (!ok) {
-            // Range 被 CDN 拒绝（416/403 等）：回退为无 Range 完整 GET
+        if (ok != ChunkResult.OK) {
+            // Range 被 CDN 拒绝（416/403）或忽略（200 整文件）：回退为无 Range 完整 GET
             Log.w(TAG, "streamDownload: id=$id Range 失败，回退完整 GET 下载")
             val ok2 = downloader.downloadFull(
                 taskId = id,
@@ -449,27 +495,45 @@ class DownloadManager(
             if (!ok2) throw IllegalStateException("下载失败（Range 与完整下载均失败）")
         }
         if (!isTaskActive()) return
-        finishDownload(id, chunkDir, listOf(partFile), task.fileName)
+        finishDownload(id, chunkDir, listOf(partFile), task.fileName, 0)
     }
 
-    /** 合并分片 → 保存到公共 Download 目录 → 触发完成回调 → 清理临时文件 */
+    /**
+     * 合并分片 → 保存到公共 Download 目录 → 触发完成回调 → 清理。
+     * ★ 增加完整性校验：分片非空 + 合并后总大小 == total，任一不符直接抛错，绝不保存损坏文件。
+     */
     private suspend fun finishDownload(
         id: Long,
         chunkDir: File,
         chunkFiles: List<File>,
-        fileName: String
+        fileName: String,
+        total: Long
     ) {
         if (!isTaskActive()) return
+        // 1) 分片完整性
+        for (part in chunkFiles) {
+            if (!part.exists() || part.length() <= 0) {
+                Log.e(TAG, "finishDownload: id=$id 分片缺失/为空 $part")
+                throw IllegalStateException("分片文件缺失或为空，拒绝合并（防止文件损坏）")
+            }
+        }
+        // 2) 合并
         val merged = File(context.cacheDir, "merged_$id")
         if (!downloader.mergeChunks(chunkFiles, merged)) {
             Log.e(TAG, "finishDownload: id=$id 合并分片失败")
             throw IllegalStateException("合并分片失败")
         }
-        if (!isTaskActive()) return
+        // 3) 整体大小校验（total>0 时）
+        if (total > 0 && merged.length() != total) {
+            Log.e(TAG, "finishDownload: id=$id 文件大小校验失败 期望=$total 实际=${merged.length()}")
+            merged.delete()
+            throw IllegalStateException("文件大小校验失败：期望 $total 字节，实际 ${merged.length()} 字节（已拒绝保存损坏文件）")
+        }
+        // 4) 保存
         val savedPath = DownloadSaver.save(context, fileName, merged)
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
-        Log.d(TAG, "finishDownload: id=$id 下载完成 savedPath=$savedPath")
+        Log.d(TAG, "finishDownload: id=$id 下载完成 savedPath=$savedPath size=${merged.length()}")
         taskCallbacks.remove(id)?.let { cb ->
             runCatching { cb() }
         }
@@ -483,6 +547,7 @@ class DownloadManager(
         private var lastBytes = 0L
         private var lastTime = System.currentTimeMillis()
 
+        @Synchronized
         fun onBytes(total: Long): Long? {
             val now = System.currentTimeMillis()
             val elapsed = now - lastTime
