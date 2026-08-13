@@ -14,6 +14,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -303,11 +304,14 @@ class DownloadManager(
         val allOk = coroutineScope {
             val results = (0 until chunkCount).map { i ->
                 async(Dispatchers.IO) {
+                    // ★ 错峰：每批分片间隔 10ms 启动，避免瞬间打满连接触发 CDN 降级
+                    //（迅雷离线节点高并发时部分 Range 会被降级为 200 整文件）
+                    delay((i / threadCount) * 10L)
                     semaphore.withPermit {
                         val start = i * chunkSize
                         val end = min(start + chunkSize - 1, total - 1)
                         try {
-                            downloader.downloadChunk(
+                            val ok = downloader.downloadChunk(
                                 taskId = id,
                                 url = task.url,
                                 start = start,
@@ -333,6 +337,11 @@ class DownloadManager(
                                     }
                                 }
                             }
+                            // 分片失败原因补全（downloadChunk 返回 false 不带原因，这里记录便于排查）
+                            if (!ok) {
+                                failedReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount 下载失败（非206/网络异常）")
+                            }
+                            ok
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -345,13 +354,39 @@ class DownloadManager(
             results.all { it }
         }
         if (!allOk) {
-            Log.e(TAG, "runTask: id=$id 分片下载失败 reason=${failedReason.get()}")
-            // CDN 可能不支持 Range（部分直链忽略 Range/返回 416）：回退无 Range 完整下载
-            Log.w(TAG, "runTask: id=$id 回退完整 GET 下载")
-            chunkDir.deleteRecursively()
-            chunkDir.mkdirs()
+            Log.e(TAG, "runTask: id=$id 部分分片失败 reason=${failedReason.get()}，开始重试失败分片")
+            // ★ 不删盘：保留已成功分片，只重试失败的（串行，降并发避免再次触发 CDN 降级）
+            val retryOk = (0 until chunkCount).all { i ->
+                val partFile = File(chunkDir, "part_$i")
+                val start = i * chunkSize
+                val end = min(start + chunkSize - 1, total - 1)
+                // 已完整的分片跳过（downloadChunk 内部会判断 existing >= total 直接返回 true）
+                if (partFile.length() >= (end - start + 1)) true
+                else {
+                    val ok = downloader.downloadChunk(
+                        taskId = id, url = task.url, start = start, end = end,
+                        partFile = partFile, headers = headers
+                    ) { bytes ->
+                        val new = downloaded.addAndGet(bytes)
+                        if (!isTaskActive()) return@downloadChunk
+                        dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
+                        // 前台通知进度（2 秒节流）
+                        notifyProgress(task.fileName, new, total)
+                    }
+                    if (!ok) failedReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount 重试仍失败")
+                    ok
+                }
+            }
+            if (retryOk) {
+                Log.d(TAG, "runTask: id=$id 重试后所有分片完成，开始合并")
+                finishDownload(id, chunkDir, (0 until chunkCount).map { File(chunkDir, "part_$it") }, task.fileName)
+                return
+            }
+            // 重试仍失败：回退单连接整文件下载（不删盘，downloadFull 会从 part_0 已有大小续传）
+            Log.w(TAG, "runTask: id=$id 分片重试失败，回退单连接整文件下载")
             val fullPart = File(chunkDir, "part_0")
-            val fullDownloaded = AtomicLong(0)
+            // ★ 不 deleteRecursively：保留可能已部分下载的 part_0，断点续传
+            val fullDownloaded = AtomicLong(downloaded.get())
             val fullOk = downloader.downloadFull(
                 taskId = id,
                 url = task.url,

@@ -165,16 +165,51 @@ class ChunkDownloader(private val client: OkHttpClient) {
         val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
         try {
             return call.execute().use { response ->
-                // 206 分片响应；200 表示服务器忽略 Range（仅允许 start=0 单片场景）
-                if (response.code != 206 && !(response.code == 200 && from == 0L)) {
-                    Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end 非预期状态码 ${response.code}")
+                val code = response.code
+                // 防盗链/广告回退检测：HTML 页面直接终止
+                val contentType = response.header("Content-Type").orEmpty()
+                if (contentType.contains("text/html", ignoreCase = true)) {
+                    Log.w(TAG, "downloadChunk: task=$taskId 返回 text/html（疑似广告/错误页），终止")
                     return@use false
                 }
-                Log.d(TAG, "downloadChunk: task=$taskId range=$from-$end code=${response.code} 下载中")
                 val body = response.body ?: return@use false
+
+                // ★ 识别三种合法响应：
+                //   206 = 标准 Range 分片响应
+                //   200 + from==0 = 服务器忽略 Range，首片从 0 开始（原逻辑已支持）
+                //   200 + from>0  = CDN 降级返回整文件（迅雷离线节点高并发时常见），
+                //                   从 body 中跳过 [0, from) 字节，截取 [from, end] 写入
+                val isFullBody = code == 200
+                if (code != 206 && !isFullBody) {
+                    Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end 非预期状态码 $code")
+                    return@use false
+                }
+                if (isFullBody && from > 0L) {
+                    Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end 服务器返回200整文件(CDN降级)，截取目标区间")
+                }
+
                 RandomAccessFile(partFile, "rw").use { raf ->
                     raf.seek(existing)
                     body.byteStream().use { input ->
+                        // ★ 200 整文件响应：先跳过 [0, from) 字节，再读取目标区间
+                        if (isFullBody && from > 0L) {
+                            var skipRemaining = from
+                            while (skipRemaining > 0) {
+                                val skipped = input.skip(skipRemaining)
+                                if (skipped <= 0) {
+                                    // skip 可能因流式传输返回 0，用 read 兜底
+                                    val buf = ByteArray(BUFFER_SIZE)
+                                    while (skipRemaining > 0) {
+                                        val need = min(buf.size.toLong(), skipRemaining).toInt()
+                                        val read = input.read(buf, 0, need)
+                                        if (read <= 0) break
+                                        skipRemaining -= read
+                                    }
+                                    break
+                                }
+                                skipRemaining -= skipped
+                            }
+                        }
                         val buffer = ByteArray(BUFFER_SIZE)
                         // 本轮预期写入 = 区间 [from, end] 大小（不含已有部分）；未知总大小时不限制（读到 EOF）
                         val expected = if (unknownTotal) -1L else end - from + 1
