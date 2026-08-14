@@ -2,12 +2,16 @@ package com.yunx.app.ui.screens
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.Manifest
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -58,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.yunx.app.R
 import com.yunx.app.ui.SnackbarController
 import kotlinx.coroutines.Dispatchers
@@ -80,6 +85,14 @@ fun SupportScreen(
     val scope = rememberCoroutineScope()
     // 保存到相册成功状态（覆盖层内全局 Snackbar 可能被遮挡，用本地状态兜底反馈）
     var saved by remember { mutableStateOf(false) }
+    // Android 9- 保存到公共 Pictures 需 WRITE_EXTERNAL_STORAGE 运行时授权
+    var pendingPermission by remember { mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean>?>(null) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        pendingPermission?.complete(granted)
+        pendingPermission = null
+    }
     // 系统返回键 → 返回设置页
     BackHandler { onBack() }
 
@@ -258,6 +271,23 @@ fun SupportScreen(
             Button(
                 onClick = {
                     scope.launch {
+                        // Android 9- 保存相册前检查并动态申请存储权限
+                        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            true
+                        } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+                            true
+                        } else {
+                            val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                            pendingPermission = deferred
+                            withContext(Dispatchers.Main) {
+                                permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            }
+                            deferred.await()
+                        }
+                        if (!granted) {
+                            SnackbarController.show("未授予存储权限，无法保存到相册")
+                            return@launch
+                        }
                         val ok = withContext(Dispatchers.IO) {
                             saveWechatQrToGallery(context)
                         }

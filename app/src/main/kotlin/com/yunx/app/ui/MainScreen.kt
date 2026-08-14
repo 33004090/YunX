@@ -38,8 +38,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import com.yunx.app.data.db.AppDatabase
 import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
@@ -94,7 +100,10 @@ import com.yunx.app.ui.viewmodel.UCCoudViewModel
 import com.yunx.app.ui.viewmodel.UCAccountViewModel
 import com.yunx.app.ui.viewmodel.XunleiAccountViewModel
 import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
@@ -212,6 +221,29 @@ fun MainScreen() {
             downloader = ChunkDownloader(downloadClient),
             threadProvider = settings::downloadThreads
         )
+    }
+    // Android 9- 写公共 Download 需要 WRITE_EXTERNAL_STORAGE 运行时授权：
+    // 下载完成保存前由 DownloadManager.storagePermissionProvider 触发动态申请，授权后自动继续保存
+    var pendingStoragePermission by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        pendingStoragePermission?.complete(granted)
+        pendingStoragePermission = null
+    }
+    downloadManager.storagePermissionProvider = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            true // Android 10+ MediaStore 无需存储权限
+        } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+            true
+        } else {
+            val deferred = CompletableDeferred<Boolean>()
+            pendingStoragePermission = deferred
+            withContext(Dispatchers.Main) {
+                storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+            deferred.await()
+        }
     }
     val viewModel: QuarkAccountViewModel = viewModel(
         factory = QuarkAccountViewModel.Factory(repository)

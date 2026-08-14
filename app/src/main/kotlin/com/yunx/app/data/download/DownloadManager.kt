@@ -69,6 +69,13 @@ class DownloadManager(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /**
+     * 保存前存储权限检查（Android 9- 写公共 Download 需 WRITE_EXTERNAL_STORAGE 运行时授权）。
+     * UI 层注入：无权限时动态申请并等待授权结果；已授权/Android 10+ 直接返回 true。
+     * 授权后会自动继续保存（同一协程 await 授权结果再往下走）。
+     */
+    var storagePermissionProvider: suspend () -> Boolean = { true }
+
+    /**
      * 运行中的任务 Job：value 为 CompletableDeferred，注册/移除全程由 jobsLock 保护，
      * 保证 start/pause/remove 之间无 TOCTOU 竞态（防止"暂停/删除瞬间任务继续跑"）。
      */
@@ -522,6 +529,11 @@ class DownloadManager(
             hlsFile.delete()
             throw IllegalStateException("HLS 转码流下载失败")
         }
+        // Android 9- 保存前检查存储权限（动态申请，授权后继续；无权限则报错提示）
+        if (!storagePermissionProvider()) {
+            hlsFile.delete()
+            throw IllegalStateException("未授予存储权限，无法保存到下载目录")
+        }
         val savedPath = DownloadSaver.save(context, task.fileName, hlsFile)
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
@@ -562,7 +574,12 @@ class DownloadManager(
             merged.delete()
             throw IllegalStateException("文件大小校验失败：期望 $total 字节，实际 ${merged.length()} 字节（已拒绝保存损坏文件）")
         }
-        // 4) 保存
+        // 4) Android 9- 保存前检查存储权限（动态申请，授权后继续；无权限则报错提示）
+        if (!storagePermissionProvider()) {
+            merged.delete()
+            throw IllegalStateException("未授予存储权限，无法保存到下载目录")
+        }
+        // 5) 保存
         val savedPath = DownloadSaver.save(context, fileName, merged)
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
