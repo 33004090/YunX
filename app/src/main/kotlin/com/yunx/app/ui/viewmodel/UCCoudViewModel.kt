@@ -13,6 +13,7 @@ import com.yunx.app.data.network.UCConstants
 import com.yunx.app.data.network.model.DownloadLink
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareInfo
+import com.yunx.app.data.network.model.ShareToken
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -222,11 +223,46 @@ class UCCoudViewModel(
         videoExts.contains(name.substringAfterLast('.', "").lowercase())
 
     /**
-     * 取下载直链：视频优先走 play 转码流（绕过非会员视频被换成宣传片的问题，转码清晰度非原画），
-     * play 不可用或非视频回退 entry=ft 高速通道（与分享解析同款 DOWNLOAD_URL），再回退个人云盘通道（cloudGetDownloadLink）。
+     * UC 网盘视频下载的**自动化流程**（绕开官方 VIP 广告视频）：
+     * 直接取链（OSS/play）会把非会员视频换成 14.6MB 官方宣传片/转码流，因此改为：
+     * ① 自动创建「1 天有效、无提取码」的分享链接；
+     * ② 用分享解析流程（getShareToken → transfer_share/detail → video_preview）取**原画**直链；
+     * ③ 拿到的直链走播放回调 checkplay 不换片，交给下载器。
+     */
+    private suspend fun ucVideoDownloadLinkViaShare(file: ShareFile, cookie: String): DownloadLink? {
+        // ① 创建 1 天有效、无提取码分享（UCApi.createShare 内部已异步轮询拿 share_id）
+        val shareId = api.createShare(
+            fidList = listOf(file.fid),
+            title = file.fname,
+            urlType = 1,       // 1=无提取码
+            passcode = "",
+            expiredType = 2,   // 2=1 天
+            cookie = cookie
+        ) ?: return null
+        // ② 查分享信息拿**对外分享码 pwd_id**（share_id 是内部 ID，直接当 pwd_id 调 token 会 41006 分享不存在）
+        val pwdId = api.getShareInfo(shareId, cookie)?.pwdId?.takeIf { it.isNotBlank() } ?: shareId
+        // ③ 分享解析流程：token → 文件列表 → video_preview 原画直链
+        val token = api.getShareToken(pwdId, null, cookie) ?: return null
+        val files = api.getTransferShareFiles(pwdId, token.stoken, "0", cookie) ?: return null
+        val target = files.firstOrNull { it.fid == file.fid } ?: files.firstOrNull() ?: return null
+        return api.getVideoPreview(
+            pwdId = pwdId,
+            stoken = token.stoken,
+            fid = target.fid,
+            fidToken = target.fidToken,
+            cookie = cookie
+        )?.copy(filename = file.fname)
+    }
+
+    /**
+     * 取下载直链：视频优先走「创建分享 → video_preview 原画直链」自动化流程（绕过非会员视频被换成宣传片），
+     * 失败回退 play 转码流；非视频走 entry=ft 高速通道（与分享解析同款 DOWNLOAD_URL），再回退个人云盘通道（cloudGetDownloadLink）。
      */
     private suspend fun ucDownloadLink(fid: String, cookie: String, file: ShareFile): DownloadLink? {
         if (isVideo(file.fname)) {
+            // 优先：自动化分享流程取原画直链（绕会员墙，原画清晰度）
+            ucVideoDownloadLinkViaShare(file, cookie)?.let { return it }
+            // 回退：play 转码流
             api.getPlayLink(fid, cookie)?.let { play ->
                 return DownloadLink(
                     fid = fid,

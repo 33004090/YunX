@@ -76,7 +76,8 @@ fun BaiduLoginScreen(
     var isSavingManual by remember { mutableStateOf(false) }
 
     var showTutorial by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { showTutorial = true }
+    // 进入登录页先弹风控提示，确认后再弹登录教程（避免两个弹窗叠层）
+    var showRiskDialog by remember { mutableStateOf(true) }
 
     val webView = remember {
         WebView(context).apply {
@@ -190,6 +191,34 @@ fun BaiduLoginScreen(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
         }
+    }
+
+    // 风控温馨提示弹窗（进入登录页优先展示）
+    if (showRiskDialog) {
+        AlertDialog(
+            onDismissRequest = { showRiskDialog = false },
+            icon = { Icon(Icons.Outlined.Info, contentDescription = null) },
+            title = { Text("温馨提示") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "百度网盘风控严重，可能导致你的账号被风控",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "请勿高频操作（频繁解析/转存/下载），如遇异常建议降低使用频率或稍后再试。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRiskDialog = false
+                    showTutorial = true
+                }) { Text("我知道了") }
+            }
+        )
     }
 
     // 登录教程弹窗
