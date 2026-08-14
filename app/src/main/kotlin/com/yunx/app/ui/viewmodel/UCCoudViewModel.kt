@@ -215,13 +215,31 @@ class UCCoudViewModel(
 
     // ---------- 单文件操作 ----------
 
+    /** 常见视频扩展名（UC 非会员视频走 play 转码流绕过会员墙，代价是转码清晰度） */
+    private val videoExts = setOf("mp4", "mkv", "mov", "avi", "webm", "flv", "ts", "m3u8", "wmv", "rmvb")
+
+    private fun isVideo(name: String): Boolean =
+        videoExts.contains(name.substringAfterLast('.', "").lowercase())
+
     /**
-     * 取下载直链：优先走 entry=ft 高速通道（与分享解析同款 DOWNLOAD_URL，个人文件同样可用，
-     * 经 UCResolveRepository 转存后取链验证过），失败时回退个人云盘通道（cloudGetDownloadLink）保证兼容。
+     * 取下载直链：视频优先走 play 转码流（绕过非会员视频被换成宣传片的问题，转码清晰度非原画），
+     * play 不可用或非视频回退 entry=ft 高速通道（与分享解析同款 DOWNLOAD_URL），再回退个人云盘通道（cloudGetDownloadLink）。
      */
-    private suspend fun ucDownloadLink(fid: String, cookie: String): DownloadLink? =
-        api.getDownloadLink(fid, cookie)
+    private suspend fun ucDownloadLink(fid: String, cookie: String, file: ShareFile): DownloadLink? {
+        if (isVideo(file.fname)) {
+            api.getPlayLink(fid, cookie)?.let { play ->
+                return DownloadLink(
+                    fid = fid,
+                    filename = file.fname,
+                    downloadUrl = play.url,
+                    size = -1L, // 转码流大小未知，下载器走流式/探测
+                    isHls = play.isHls
+                )
+            }
+        }
+        return api.getDownloadLink(fid, cookie)
             ?: api.cloudGetDownloadLink(fid, cookie)
+    }
 
     /** UC 下载直链的请求头（OSS 按 Referer 档位限速，必须带官方 Referer/Origin） */
     private fun downloadHeaders(cookie: String): Map<String, String> = mapOf(
@@ -279,7 +297,7 @@ class UCCoudViewModel(
                 tasks.forEachIndexed { index, (file, relPath) ->
                     folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
-                        val link = ucDownloadLink(file.fid, cookie) ?: return@runCatching
+                        val link = ucDownloadLink(file.fid, cookie, file) ?: return@runCatching
                         downloadManager.enqueue(
                             url = link.downloadUrl,
                             fileName = relPath, // 相对路径：Download/文件夹A/子目录/文件.mp4
@@ -311,7 +329,7 @@ class UCCoudViewModel(
                     cloudMessage = "请先登录 UC 网盘"
                     return@launch
                 }
-                val link = ucDownloadLink(file.fid, cookie)
+                val link = ucDownloadLink(file.fid, cookie, file)
                     ?: throw IllegalStateException("获取下载链接失败")
                 downloadManager.enqueue(
                     url = link.downloadUrl,
@@ -452,7 +470,7 @@ class UCCoudViewModel(
                 tasks.forEachIndexed { index, (file, relPath) ->
                     folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
-                        val link = ucDownloadLink(file.fid, cookie) ?: return@runCatching
+                        val link = ucDownloadLink(file.fid, cookie, file) ?: return@runCatching
                         downloadManager.enqueue(
                             url = link.downloadUrl,
                             // 文件夹内文件用相对路径（保持目录结构）；根目录文件用取链返回的文件名

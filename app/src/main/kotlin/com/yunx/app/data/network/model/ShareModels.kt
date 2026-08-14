@@ -60,5 +60,15 @@ data class DownloadLink(
     val filename: String,
     val downloadUrl: String,
     val size: Long,
-    val cleanupDirFid: String? = null
+    val cleanupDirFid: String? = null,
+    /** 是否为 HLS（m3u8）转码流地址：下载走 HLS 分片合并路径（UC play 绕过会员墙） */
+    val isHls: Boolean = false
+)
+
+/** UC 转码播放流（绕过非会员视频下载被换成宣传片的问题；url 为 m3u8/fmp4 分片地址） */
+data class PlayLink(
+    val url: String,
+    val resolution: String,
+    val format: String,
+    val isHls: Boolean
 )

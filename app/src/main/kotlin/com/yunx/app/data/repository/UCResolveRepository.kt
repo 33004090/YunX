@@ -12,6 +12,12 @@ import com.yunx.app.data.network.model.ShareSession
  */
 class UCResolveRepository(private val api: UCApi) : ShareResolveRepository {
 
+    /** 常见视频扩展名（分享视频走 play 转码流绕过会员墙；play 需个人云盘 fid，先转存临时目录） */
+    private val videoExts = setOf("mp4", "mkv", "mov", "avi", "webm", "flv", "ts", "m3u8", "wmv", "rmvb")
+
+    private fun isVideo(name: String): Boolean =
+        videoExts.contains(name.substringAfterLast('.', "").lowercase())
+
     override suspend fun createSession(link: String, pwd: String?, cookie: String): Result<ShareSession> {
         val parsed = ShareLinkParser.parse(link)
             ?: return Result.failure(IllegalArgumentException("无法识别分享链接"))
@@ -86,6 +92,25 @@ class UCResolveRepository(private val api: UCApi) : ShareResolveRepository {
         file: ShareFile,
         cookie: String
     ): Result<DownloadLink> = runCatching {
+        // 视频：优先用分享态 video_preview 取**原画**直链（走播放回调 checkplay，不换片，绕过宣传片替换）
+        if (isVideo(file.fname)) {
+            val preview = api.getVideoPreview(
+                pwdId = session.shareId,
+                stoken = session.stoken,
+                fid = file.fid,
+                fidToken = file.fidToken,
+                cookie = cookie
+            )
+            if (preview != null) {
+                return@runCatching DownloadLink(
+                    fid = file.fid,
+                    filename = file.fname,
+                    downloadUrl = preview.downloadUrl,
+                    size = preview.size,
+                    isHls = false
+                )
+            }
+        }
         api.getShareDownloadLink(
             fid = file.fid,
             fidToken = file.fidToken,

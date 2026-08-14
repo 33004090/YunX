@@ -275,6 +275,13 @@ class DownloadManager(
         dao.updateStatus(id, DownloadTaskEntity.STATUS_DOWNLOADING)
         Log.d(TAG, "runTask: id=$id fileName=${task.fileName}")
 
+        // HLS（m3u8 转码流，如 UC play）：不走 Range 分片，直接拉分片合并
+        if (task.url.contains(".m3u8", true) || task.url.contains(".m3u", true)) {
+            Log.d(TAG, "runTask: id=$id HLS 转码流下载 url=${task.url.take(120)}")
+            hlsDownload(id, task, headers)
+            return
+        }
+
         // 总大小以服务器探测为准（Range0-0 的 Content-Range 是真实总大小），
         // 避免各平台传入的 size 与实际不符导致分片区间错误 → 文件截断/膨胀损坏
         val total = downloader.getTotalSize(task.url, headers)
@@ -496,6 +503,32 @@ class DownloadManager(
         }
         if (!isTaskActive()) return
         finishDownload(id, chunkDir, listOf(partFile), task.fileName, 0)
+    }
+
+    /** HLS（m3u8 转码流，如 UC play）下载：拉取分片合并 → 保存 → 完成回调 */
+    private suspend fun hlsDownload(id: Long, task: DownloadTaskEntity, headers: Map<String, String>) {
+        if (!isTaskActive()) return
+        _stats.update { it + (id to DownloadStats(0L, -1L, 1)) }
+        val hlsFile = File(context.cacheDir, "hls_$id")
+        hlsFile.delete()
+        val downloaded = AtomicLong(0)
+        val ok = HlsDownloader.download(task.url, headers, hlsFile) { bytes ->
+            val new = downloaded.addAndGet(bytes)
+            dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, 0)
+            notifyProgress(task.fileName, new, 0)
+        }
+        if (!isTaskActive()) return
+        if (!ok) {
+            hlsFile.delete()
+            throw IllegalStateException("HLS 转码流下载失败")
+        }
+        val savedPath = DownloadSaver.save(context, task.fileName, hlsFile)
+            ?: throw IllegalStateException("保存到下载目录失败")
+        dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
+        Log.d(TAG, "hlsDownload: id=$id 下载完成 savedPath=$savedPath size=${hlsFile.length()}")
+        taskCallbacks.remove(id)?.let { cb -> runCatching { cb() } }
+        _stats.update { it - id }
+        hlsFile.delete()
     }
 
     /**

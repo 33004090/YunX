@@ -1,6 +1,7 @@
 package com.yunx.app.data.network
 
 import com.yunx.app.data.network.model.DownloadLink
+import com.yunx.app.data.network.model.PlayLink
 import com.yunx.app.data.network.model.QuotaInfo
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareInfo
@@ -402,6 +403,97 @@ suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withCo
             downloadUrl = item.optString("download_url"),
             size = item.optLong("size")
         )
+    }
+
+        /**
+     * 分享视频预览（原画直链，绕过非会员视频下载被换成宣传片的问题）。
+     * GET share/sharepage/video_preview？pwd_id/stoken/fid/fid_token →
+     * data.play_info.url（原画 OSS 直链，走播放回调 checkplay 不换片）+ size（原画大小，可校验）。
+     * 仅对分享态视频有意义；链接约 3 小时有效（x-ttl=10800）。
+     */
+    suspend fun getVideoPreview(
+        pwdId: String,
+        stoken: String,
+        fid: String,
+        fidToken: String,
+        cookie: String
+    ): DownloadLink? = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append(UCConstants.VIDEO_PREVIEW_URL)
+            append("?pr=UCBrowser&fr=h5")
+            append("&pwd_id=").append(URLEncoder.encode(pwdId, "UTF-8"))
+            append("&stoken=").append(URLEncoder.encode(stoken, "UTF-8"))
+            append("&fid=").append(URLEncoder.encode(fid, "UTF-8"))
+            append("&fid_token=").append(URLEncoder.encode(fidToken, "UTF-8"))
+        }
+        val request = Request.Builder()
+            .url(url)
+            .header("Cookie", cookie)
+            .header("User-Agent", UCConstants.USER_AGENT)
+            .header("Origin", UCConstants.WEB_ORIGIN)
+            .header("Referer", UCConstants.DOWNLOAD_REFERER)
+            .header("Content-Type", "application/json")
+            .get()
+            .build()
+        runCatching {
+            val resp = client.newCall(request).execute()
+            val json = JSONObject(resp.use { it.body?.string() } ?: "{}")
+            if (json.optInt("status") != 200 && json.optInt("code") != 0) return@runCatching null
+            val data = json.optJSONObject("data") ?: return@runCatching null
+            val playInfo = data.optJSONObject("play_info") ?: return@runCatching null
+            val directUrl = playInfo.optString("url").takeIf { it.isNotBlank() } ?: return@runCatching null
+            DownloadLink(
+                fid = fid,
+                filename = "",
+                downloadUrl = directUrl,
+                size = playInfo.optLong("size")
+            )
+        }.getOrNull()
+    }
+
+    /**
+     * UC 转码播放流（绕过非会员视频下载被换成宣传片的问题）。
+     * POST file/v2/play/project → data.video_list[].video_info.url（m3u8/fmp4）。
+     * 仅对视频有意义；返回首个非空播放地址 + 其清晰度。
+     * 先试带 pr/fr 的主路径；失败则用裸路径重试（Alist getTranscodingLink 方式，对 UC 也可通）。
+     */
+    suspend fun getPlayLink(fid: String, cookie: String): PlayLink? = withContext(Dispatchers.IO) {
+        playProject(UCConstants.PLAY_URL, fid, cookie)
+            ?: playProject("${UCConstants.API_BASE}/1/clouddrive/file/v2/play/project", fid, cookie)
+    }
+
+    private fun playProject(url: String, fid: String, cookie: String): PlayLink? {
+        val body = JSONObject()
+            .put("fid", fid)
+            .put("resolutions", "low,normal,high,super,2k,4k")
+            .put("supports", "fmp4_av,m3u8,dolby_vision")
+            .toString()
+        val request = Request.Builder()
+            .url(url)
+            .header("Cookie", cookie)
+            .header("User-Agent", UCConstants.USER_AGENT)
+            .header("Content-Type", "application/json;charset=UTF-8")
+            .header("Origin", UCConstants.WEB_ORIGIN)
+            .header("Referer", UCConstants.DOWNLOAD_REFERER)
+            .post(body.toRequestBody(jsonMediaType))
+            .build()
+        return runCatching {
+            val resp = client.newCall(request).execute()
+            val json = JSONObject(resp.use { it.body?.string() } ?: "{}")
+            if (json.optInt("status") != 200 && json.optInt("code") != 0) return@runCatching null
+            val list = json.optJSONObject("data")?.optJSONArray("video_list") ?: return@runCatching null
+            for (i in 0 until list.length()) {
+                val info = list.optJSONObject(i)?.optJSONObject("video_info") ?: continue
+                val u = info.optString("url").takeIf { it.isNotBlank() } ?: continue
+                return@runCatching PlayLink(
+                    url = u,
+                    resolution = info.optString("resolution"),
+                    format = info.optString("format"),
+                    isHls = u.contains(".m3u8") || info.optString("format").contains("m3u8", true)
+                )
+            }
+            null
+        }.getOrNull()
     }
 
     /** 删除文件（抓包：action_type=2 + filelist + exclude_fids）；返回 task_id */
