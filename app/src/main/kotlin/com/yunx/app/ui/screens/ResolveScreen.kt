@@ -91,7 +91,7 @@ fun ResolveScreen(
     c139CloudViewModel: C139CloudViewModel,
     /** UC 网盘云盘浏览 ViewModel（UC 分享转存目录选择用） */
     ucCloudViewModel: UCCoudViewModel,
-    /** 123 网盘云盘浏览 ViewModel（123 分享转存目录选择用） */
+    /** 123 云盘浏览 ViewModel（123 分享转存目录选择用） */
     pan123CloudViewModel: Pan123CloudViewModel,
     modifier: Modifier = Modifier
 ) {
@@ -442,7 +442,7 @@ private fun platformLabel(platform: SharePlatform): String = when (platform) {
     SharePlatform.XUNLEI -> "迅雷网盘"
     SharePlatform.BAIDU -> "百度网盘"
     SharePlatform.C139 -> "139 网盘"
-    SharePlatform.PAN123 -> "123网盘"
+    SharePlatform.PAN123 -> "123云盘"
 }
 
 /** 剪贴板分享链接提示卡片：检测到分享链接时，询问是否粘贴解析 */

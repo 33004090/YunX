@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * 123 网盘账号 ViewModel：账号+密码登录 → JWT 落库，暴露登录态供主页/登录页/解析页共享。
+ * 123 云盘账号 ViewModel：账号+密码登录 → JWT 落库，暴露登录态供主页/登录页/解析页共享。
  */
 class Pan123AccountViewModel(
     private val repository: Pan123AccountRepository

@@ -14,13 +14,18 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.Calendar
 import java.util.TimeZone
 import java.util.concurrent.ThreadLocalRandom
 import java.util.zip.CRC32
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 /**
- * 123 网盘 API 封装（OkHttp，依据《123网盘API文档_面向Agent.md》）。
+ * 123 云盘 API 封装（OkHttp，依据《123网盘API文档_面向Agent.md》）。
  *
  * 鉴权体系（文档 §3.2 / §6）：
  * - 登录 `user.123pan.cn/api/user/sign_in`：无需签名，返回 JWT（data.token）；
@@ -32,13 +37,30 @@ import java.util.zip.CRC32
  * 换 `DownloadURL`（download-v2 包装），对 params 做 Base64 解码得真实 CDN 直链，下载带 Referer。
  */
 class Pan123Api(
-    private val client: OkHttpClient = OkHttpClient()
+    private val client: OkHttpClient = createUnsafeClient()
 ) {
 
     private val jsonMediaType = "application/json;charset=UTF-8".toMediaType()
 
     /** 设备标识（文档 §3.2：同一会话内不变、不参与签名；进程级固定即可） */
     private val loginuuid: String = Pan123Constants.newLoginUuid()
+
+    companion object {
+        /** 信任所有证书的 Client（调试/抓包用，与 QuarkApi/BaiduApi/C139Api 一致；上线前应改回默认校验） */
+        fun createUnsafeClient(): OkHttpClient {
+            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+            })
+            val sslContext = SSLContext.getInstance("TLS")
+            sslContext.init(null, trustAllCerts, SecureRandom())
+            return OkHttpClient.Builder()
+                .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
+                .hostnameVerifier { _, _ -> true }
+                .build()
+        }
+    }
 
     // ---------- 签名算法（文档 §6，已抓包逐字还原 + 实时验证） ----------
 
@@ -50,7 +72,7 @@ class Pan123Api(
     }
 
     /**
-     * 生成 123 网盘签名头（文档 §6.2）：
+     * 生成 123 云盘签名头（文档 §6.2）：
      * - auth-key (timeSign) = crc32_hex(替换表映射后的 UTC "YYYYMMDDHHmm"，基准 ts + 57600s = +16h)；
      * - auth-value = "<ts>-<random>-<crc32_hex(ts|random|path|web|3|auth_key)>"；
      * 签名内部固定 OS=web / VER=3（与请求头 platform/app-version 无关，文档 §6.3）。
@@ -148,16 +170,19 @@ class Pan123Api(
         next: String,
         page: Int
     ): Pair<List<ShareFile>, String?> = withContext(Dispatchers.IO) {
+        // 参数顺序与抓包一致（§5.2 文件夹分享/有提取码）；⚠️ 无提取码时不传 SharePwd（传空值会 400 "请输入Next"）
         val url = buildString {
             append(Pan123Constants.SHARE_GET_URL)
-            append("?shareKey=").append(URLEncoder.encode(shareKey, "UTF-8"))
-            append("&SharePwd=").append(URLEncoder.encode(sharePwd, "UTF-8"))
-            append("&ParentFileId=").append(parentFileId)
-            append("&limit=100")
+            append("?limit=100")
             append("&next=").append(next)
-            append("&Page=").append(page)
             append("&orderBy=file_name")
             append("&orderDirection=asc")
+            append("&shareKey=").append(URLEncoder.encode(shareKey, "UTF-8"))
+            append("&ParentFileId=").append(parentFileId)
+            append("&Page=").append(page)
+            if (sharePwd.isNotBlank()) {
+                append("&SharePwd=").append(URLEncoder.encode(sharePwd, "UTF-8"))
+            }
         }
         val request = Request.Builder()
             .url(url)

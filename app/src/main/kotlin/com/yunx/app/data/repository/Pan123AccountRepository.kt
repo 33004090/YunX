@@ -6,7 +6,7 @@ import com.yunx.app.data.network.Pan123Api
 import kotlinx.coroutines.flow.Flow
 
 /**
- * 123 网盘账号仓库：账号+密码登录 → JWT 落库（依据《123网盘API文档_面向Agent.md》§5.1）。
+ * 123 云盘账号仓库：账号+密码登录 → JWT 落库（依据《123网盘API文档_面向Agent.md》§5.1）。
  * 凭证 = data.token（Bearer JWT，约 90 天过期）；token 失效时重新走登录（无 refresh 接口，文档 §3.3）。
  */
 class Pan123AccountRepository(

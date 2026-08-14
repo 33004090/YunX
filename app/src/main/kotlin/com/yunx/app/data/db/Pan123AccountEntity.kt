@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /**
- * 123 网盘登录凭证（JWT token 落库，后续 API 请求携带 Authorization: Bearer <token>）。
+ * 123 云盘登录凭证（JWT token 落库，后续 API 请求携带 Authorization: Bearer <token>）。
  * 依据《123网盘API文档_面向Agent.md》§3.3：凭证形态为 JWT（Bearer Token），由登录接口 data.token 返回；
  * JWT exp 约 90 天后过期，token 失效（code 非 0 或 401）时重新走登录。
  */

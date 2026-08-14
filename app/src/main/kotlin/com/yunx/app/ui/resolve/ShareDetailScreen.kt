@@ -101,7 +101,7 @@ fun ShareDetailScreen(
     c139CloudViewModel: C139CloudViewModel,
     /** UC 网盘云盘浏览 ViewModel（UC 分享转存目录选择用） */
     ucCloudViewModel: UCCoudViewModel,
-    /** 123 网盘云盘浏览 ViewModel（123 分享转存目录选择用） */
+    /** 123 云盘浏览 ViewModel（123 分享转存目录选择用） */
     pan123CloudViewModel: Pan123CloudViewModel,
     scrollBehavior: TopAppBarScrollBehavior,
     /** 顶部左上角返回：退出文件页回到输入页（输入框内容保留） */

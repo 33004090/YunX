@@ -22,7 +22,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/** 123 网盘云盘浏览 UI 状态 */
+/** 123 云盘浏览 UI 状态 */
 sealed interface Pan123CloudUiState {
     data object Loading : Pan123CloudUiState
     data class Loaded(
@@ -35,7 +35,7 @@ sealed interface Pan123CloudUiState {
 }
 
 /**
- * 123 网盘云盘浏览 ViewModel（参考 139/百度云盘）：
+ * 123 云盘浏览 ViewModel（参考 139/百度云盘）：
  * - 目录浏览（根/子目录/面包屑回退）+ 下拉刷新
  * - 文件操作：下载 / 重命名 / 移动 / 创建分享 / 删除 + 长按多选批量
  * 认证走 Bearer token（Pan123AccountEntity.accessToken），目录用 fileId（根="0"）。
@@ -81,7 +81,7 @@ class Pan123CloudViewModel(
     }
 
     private suspend fun token(): String =
-        tokenProvider() ?: throw IllegalStateException("请先登录123网盘")
+        tokenProvider() ?: throw IllegalStateException("请先登录123云盘")
 
     // ---------- 目录浏览 ----------
 

@@ -279,7 +279,7 @@ fun MainScreen() {
             downloadManager
         )
     )
-    // 123 网盘云盘浏览：点击已登录的 123 卡片打开（token 从数据库读取）
+    // 123 云盘浏览：点击已登录的 123 卡片打开（token 从数据库读取）
     val pan123CloudViewModel: Pan123CloudViewModel = viewModel(
         factory = Pan123CloudViewModel.Factory(
             pan123Api,

@@ -244,7 +244,7 @@ private fun PlatformCard() {
         "迅雷网盘" to Icons.Outlined.Speed,
         "百度网盘" to Icons.Outlined.Link,
         "139 网盘" to Icons.Outlined.Cloud,
-        "123网盘" to Icons.Outlined.Cloud
+        "123云盘" to Icons.Outlined.Cloud
     )
     SectionCard {
         Row(verticalAlignment = Alignment.CenterVertically) {

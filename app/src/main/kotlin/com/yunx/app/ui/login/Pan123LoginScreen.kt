@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.yunx.app.ui.viewmodel.Pan123AccountViewModel
 
 /**
- * 123 网盘登录页：账号（手机号）+ 密码表单登录（文档 §5.1：POST user.123pan.cn/api/user/sign_in 换 JWT）。
+ * 123 云盘登录页：账号（手机号）+ 密码表单登录（文档 §5.1：POST user.123pan.cn/api/user/sign_in 换 JWT）。
  * 123 无短信/验证码登录，纯账号密码；成功即落库并自动关闭登录页。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,7 +56,7 @@ fun Pan123LoginScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("123网盘登录", style = MaterialTheme.typography.titleLarge) },
+                title = { Text("123云盘登录", style = MaterialTheme.typography.titleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -75,12 +75,12 @@ fun Pan123LoginScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "登录123网盘",
+                text = "登录123云盘",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
             )
             Text(
-                text = "使用 123 网盘账号登录，支持解析与下载分享文件",
+                text = "使用 123 云盘账号登录，支持解析与下载分享文件",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -121,7 +121,7 @@ fun Pan123LoginScreen(
             }
 
             Text(
-                text = "凭证为登录后签发的 JWT（约 90 天有效），仅用于请求 123 网盘接口",
+                text = "凭证为登录后签发的 JWT（约 90 天有效），仅用于请求 123 云盘接口",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

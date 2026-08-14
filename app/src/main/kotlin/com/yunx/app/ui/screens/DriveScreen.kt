@@ -103,7 +103,7 @@ fun DriveScreen(
     baiduCloudViewModel: BaiduCloudViewModel,
     /** 139 网盘云盘浏览 ViewModel */
     c139CloudViewModel: C139CloudViewModel,
-    /** 123 网盘云盘浏览 ViewModel */
+    /** 123 云盘浏览 ViewModel */
     pan123CloudViewModel: Pan123CloudViewModel,
     /** 网盘空间详情 ViewModel（顶部空间总览） */
     driveQuotaViewModel: DriveQuotaViewModel,
@@ -139,7 +139,7 @@ fun DriveScreen(
     var showBaiduCloud by rememberSaveable { mutableStateOf(false) }
     // 139 网盘云盘浏览：网盘 Tab 内切换（非全屏）
     var showC139Cloud by rememberSaveable { mutableStateOf(false) }
-    // 123 网盘云盘浏览：网盘 Tab 内切换（非全屏）
+    // 123 云盘浏览：网盘 Tab 内切换（非全屏）
     var showPan123Cloud by rememberSaveable { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
@@ -180,7 +180,7 @@ fun DriveScreen(
     )
     val pan123 = DriveAccount(
         id = "pan123",
-        name = "123网盘",
+        name = "123云盘",
         description = pan123Account?.nickname ?: "点击登录，支持解析下载",
         avatarText = "123",
         isLoggedIn = pan123Account != null

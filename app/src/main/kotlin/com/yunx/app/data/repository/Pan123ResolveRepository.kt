@@ -7,7 +7,7 @@ import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareSession
 
 /**
- * 123 网盘分享解析仓库（依据《123网盘API文档_面向Agent.md》§4.2）：
+ * 123 云盘分享解析仓库（依据《123网盘API文档_面向Agent.md》§4.2）：
  * - createSession：GET /b/api/share/get（匿名，带 SharePwd）校验提取码 + 取标题；
  * - listFiles：GET /b/api/share/get 翻页（Next=="-1" 末页；空串表示还有下一页）；
  * - getShareDownloadLink：POST /b/api/share/download/info（需登录 token + 签名）→ 解码 DownloadURL；
@@ -37,16 +37,16 @@ class Pan123ResolveRepository(
 
     override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
         runCatching {
-            // 翻页直到末页（Next=="-1"），上限保护 50 页
+            // alist 实证（drivers/123_share/util.go）：next 参数始终固定 "0"，翻页靠 Page 递增；
+            // 结束条件：Next=="-1" 或列表为空（Next=="" 表示还有，继续翻页）
             val all = mutableListOf<ShareFile>()
-            var next = "0"
             var page = 1
             do {
-                val (files, nextCursor) = api.getShareFiles(session.shareId, session.stoken, dirFid, next, page)
+                val (files, nextCursor) = api.getShareFiles(session.shareId, session.stoken, dirFid, "0", page)
                 all += files
-                next = nextCursor ?: "-1"
+                val hasMore = files.isNotEmpty() && nextCursor != null
                 page++
-            } while (next != "-1" && page < 50)
+            } while (hasMore && page < 50)
             all
         }.fold(
             onSuccess = { Result.success(it) },
@@ -69,7 +69,7 @@ class Pan123ResolveRepository(
         cookie: String
     ): Result<String> = runCatching {
         val token = cookie.ifBlank { tokenProvider() ?: "" }
-        if (token.isBlank()) throw IllegalStateException("请先登录123网盘")
+        if (token.isBlank()) throw IllegalStateException("请先登录123云盘")
         val (taskId, shareId) = api.copySave(
             shareKey = session.shareId,
             sharePwd = session.stoken,
@@ -94,7 +94,7 @@ class Pan123ResolveRepository(
     ): Result<DownloadLink> = runCatching {
         // cookie 参数即登录 token（ResolveViewModel.currentCredential 返回 accessToken）
         val token = cookie.ifBlank { tokenProvider() ?: "" }
-        if (token.isBlank()) throw IllegalStateException("请先登录123网盘")
+        if (token.isBlank()) throw IllegalStateException("请先登录123云盘")
         val link = api.getShareDownloadLink(session.shareId, file, token)
             ?: throw IllegalStateException("获取下载链接失败")
         link.copy(filename = file.fname.ifBlank { link.filename })

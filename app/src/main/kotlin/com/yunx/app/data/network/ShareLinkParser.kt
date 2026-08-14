@@ -24,7 +24,7 @@ object ShareLinkParser {
     private val xunleiShareIdRegex = Regex("""pan\.xunlei\.com/s/([A-Za-z0-9_-]+)""")
     private val baiduShareIdRegex = Regex("""pan\.baidu\.com/s/(1[A-Za-z0-9_-]+)""")
     private val c139ShareIdRegex = Regex("""yun\.139\.com/shareweb/.*?/w/i/([A-Za-z0-9_-]+)""")
-    // 123 网盘分享链接（抓包 + alist 实践综合，文档 §4.1）：
+    // 123 云盘分享链接（抓包 + alist 实践综合，文档 §4.1）：
     // - https://www.123pan.com/s/<ShareKey> / https://www.123865.com/s/<ShareKey>
     // - https://<UID>.share.123pan.cn/123pan/<ShareKey>
     // - https://www.123pan.cn/api/srr?sk=<ShareKey>&st=s
@@ -69,7 +69,7 @@ object ShareLinkParser {
                 ?: pwdInTextRegex.find(text)?.groupValues?.getOrNull(1)
             return ParsedShare(shareId = sid, pwd = pwd, platform = SharePlatform.C139)
         }
-        // 123 网盘链接（3 种形态，按优先级匹配）
+        // 123 云盘链接（3 种形态，按优先级匹配）
         pan123ShareIdRegex.find(url)?.groupValues?.getOrNull(1)?.let { sid ->
             val pwd = pwdInUrlRegex.find(url)?.groupValues?.getOrNull(1)
                 ?: pwdInTextRegex.find(text)?.groupValues?.getOrNull(1)

@@ -52,7 +52,7 @@ import com.yunx.app.ui.viewmodel.Pan123CloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
 
 /**
- * 转存到 123 网盘弹窗：浏览 123 个人网盘目录（只进文件夹），确认后转存到当前目录。
+ * 转存到 123 云盘弹窗：浏览 123 个人网盘目录（只进文件夹），确认后转存到当前目录。
  * 复用 Pan123CloudViewModel 做目录浏览（与网盘页同一实例）；转存走 mshare copy/save（无需签名）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -110,7 +110,7 @@ fun Pan123SaveSheet(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "转存到123网盘",
+                        text = "转存到123云盘",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Medium
                     )

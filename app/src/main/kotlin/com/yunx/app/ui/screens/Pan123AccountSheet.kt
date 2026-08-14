@@ -157,7 +157,7 @@ fun Pan123AccountSheet(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "123网盘 · 已登录",
+                            text = "123云盘 · 已登录",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

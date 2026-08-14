@@ -208,12 +208,12 @@ class ResolveViewModel(
                         // 123 保存到个人盘：copy/save（mshare 无需签名）+ 轮询 task
                         val credential = currentCredential()
                         if (credential.isNullOrBlank()) {
-                            saveMessage = "请先登录123网盘"
+                            saveMessage = "请先登录123云盘"
                             return@launch
                         }
                         pan123ResolveRepository.transferFile(s, file, toDirFid, credential)
                             .onSuccess {
-                                saveMessage = "已保存到123网盘"
+                                saveMessage = "已保存到123云盘"
                                 saveTarget = null
                             }
                             .onFailure {
@@ -461,7 +461,7 @@ class ResolveViewModel(
         SharePlatform.XUNLEI -> "迅雷网盘"
         SharePlatform.BAIDU -> "百度网盘"
         SharePlatform.C139 -> "139 网盘"
-        SharePlatform.PAN123 -> "123网盘"
+        SharePlatform.PAN123 -> "123云盘"
         else -> "夸克网盘"
     }
 

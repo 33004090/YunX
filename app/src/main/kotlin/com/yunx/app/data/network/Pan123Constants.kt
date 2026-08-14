@@ -1,7 +1,7 @@
 package com.yunx.app.data.network
 
 /**
- * 123 网盘（123pan / 123865）常量（依据《123网盘API文档_面向Agent.md》）。
+ * 123 云盘（123pan / 123865）常量（依据《123网盘API文档_面向Agent.md》）。
  * 两类主域名：
  * - 分享解析域：mshare.123pan.cn（匿名分享读取）、www.123865.com（分享下载信息）、www.123pan.com / yun.123pan.cn（业务 API）；
  * - 登录 / 个人盘域：user.123pan.cn（登录）、yun.123pan.cn（个人盘 API）。
