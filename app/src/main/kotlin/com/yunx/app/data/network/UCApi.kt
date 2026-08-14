@@ -581,7 +581,8 @@ suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withCo
             parseData(request) { data -> data.optString("task_id").takeIf { it.isNotBlank() } }
         }
 
-    /** 创建分享（抓包：POST /1/clouddrive/share，url_type 1=无提取码 2=带提取码，expired_type 1永久/2一天/3七天/4三十天） */
+    /** 创建分享（抓包：POST /1/clouddrive/share，url_type 1=无提取码 2=带提取码，expired_type 1永久/2一天/3七天/4三十天）。
+ * 注意：分享创建是**异步任务**——响应只有 data.task_id，必须轮询 /1/clouddrive/task 直到完成拿到 share_id。 */
     suspend fun createShare(
         fidList: List<String>,
         title: String,
@@ -595,17 +596,38 @@ suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withCo
             .put("title", title.ifBlank { "分享文件" })
             .put("url_type", urlType)
             .put("expired_type", expiredType)
-            .put("public_search", 0)
+            .put("public_search", if (passcode.isNotBlank()) 0 else 1)
             .apply { if (passcode.isNotBlank()) put("passcode", passcode) }
             .toString()
         val request = postJson(UCConstants.SHARE_CREATE_URL, cookie, body)
-        parseData(request) { data ->
-            data.optJSONObject("task_resp")
-                ?.optJSONObject("data")
-                ?.optString("share_id")
-                ?.takeIf { it.isNotBlank() }
-        }
+        // 1) 创建分享 → task_id（异步，须轮询等待完成）
+        val taskId = parseData(request) { data ->
+            data.optString("task_id").takeIf { it.isNotBlank() }
+        } ?: return@withContext null
+        // 2) 轮询 task 直到完成，取 share_id（官方响应 status=2 + share_id）
+        pollShareTask(taskId, cookie)
     }
+
+    /** 轮询分享创建任务（GET /1/clouddrive/task），返回 share_id；超时返回 null */
+    private suspend fun pollShareTask(taskId: String, cookie: String): String? =
+        withContext(Dispatchers.IO) {
+            val url = "${UCConstants.TASK_URL}&task_id=${URLEncoder.encode(taskId, "UTF-8")}&retry_index=0"
+            for (i in 0 until 15) {
+                val shareId = runCatching {
+                    client.newCall(get(url, cookie)).execute().use { resp ->
+                        val json = JSONObject(resp.body?.string() ?: "{}")
+                        if (json.optInt("status") != 200) return@use null
+                        val data = json.optJSONObject("data") ?: return@use null
+                        val finished = data.optLong("finished_at") > 0 || data.optInt("status") == 2
+                        if (!finished) return@use null
+                        data.optString("share_id").takeIf { it.isNotBlank() }
+                    }
+                }.getOrNull()
+                if (shareId != null) return@withContext shareId
+                delay(1000)
+            }
+            null
+        }
 
     /** 查询分享信息（抓包：POST share/password body={share_id} → 链接/提取码/标题） */
     suspend fun getShareInfo(shareId: String, cookie: String): ShareInfo? = withContext(Dispatchers.IO) {
