@@ -57,13 +57,32 @@ class Pan123ResolveRepository(
     override suspend fun ensureTempDir(cookie: String): Result<String> =
         Result.failure(UnsupportedOperationException("123 分享无需转存"))
 
-    /** 123 分享下载无需转存（文档 §4.2）；「保存到网盘」的 copy/save 签名待验证，不实现 */
+    /**
+     * 保存他人分享到个人网盘（copy/save，文档 §4.3）：mshare 子域无需签名，仅 Bearer+LoginUuid；
+     * 异步任务 → 轮询 copy/save/get 拿转存后的新 fileId。
+     * @param toDirFid 转存目标目录 ID（个人盘 fileId；0/空 = 根目录）
+     */
     override suspend fun transferFile(
         session: ShareSession,
         file: ShareFile,
         toDirFid: String,
         cookie: String
-    ): Result<String> = Result.failure(UnsupportedOperationException("123 分享无需转存即可下载"))
+    ): Result<String> = runCatching {
+        val token = cookie.ifBlank { tokenProvider() ?: "" }
+        if (token.isBlank()) throw IllegalStateException("请先登录123网盘")
+        val (taskId, shareId) = api.copySave(
+            shareKey = session.shareId,
+            sharePwd = session.stoken,
+            file = file,
+            toDirFid = toDirFid.ifBlank { "0" },
+            token = token
+        ) ?: throw IllegalStateException("创建转存任务失败")
+        api.pollCopySave(taskId, shareId, token)
+            ?: throw IllegalStateException("转存超时或失败")
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
 
     override suspend fun getDownloadLink(fid: String, cookie: String): Result<DownloadLink> =
         Result.failure(UnsupportedOperationException("123 分享请使用 getShareDownloadLink"))

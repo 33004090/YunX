@@ -189,7 +189,7 @@ class Pan123Api(
         file: ShareFile,
         token: String
     ): DownloadLink? = withContext(Dispatchers.IO) {
-        val (s3KeyFlag, etag) = decodeToken(file.fidToken)
+        val (s3KeyFlag, etag, _) = decodeToken(file.fidToken)
         val body = JSONObject()
             .put("ShareKey", shareKey)
             .put("FileID", file.fid)
@@ -241,7 +241,7 @@ class Pan123Api(
 
     /** 个人盘下载信息：POST /api/file/download_info（注意无 /b/，文档 §5.5）。返回真实直链 */
     suspend fun getDownloadLink(file: ShareFile, token: String): DownloadLink? = withContext(Dispatchers.IO) {
-        val (s3keyFlag, etag) = decodeToken(file.fidToken)
+        val (s3keyFlag, etag, _) = decodeToken(file.fidToken)
         val body = JSONObject()
             .put("driveId", 0)
             .put("etag", etag)
@@ -270,11 +270,117 @@ class Pan123Api(
 
     // ---------- 网盘管理操作（文档 §5.7-5.10） ----------
 
+    /**
+     * 保存他人分享到个人网盘（copy/save，文档 §4.3）。
+     * ⚠️ mshare 子域**无需任何客户端签名**（源码实证 + 实测 code:0），仅带 Bearer + LoginUuid。
+     * 转存是异步任务：返回 (taskID, ShareId) 用于轮询 copy/save/get。
+     * @param toDirFid 转存目标目录 ID（个人盘 fileId；body 的 parentFileID/parentFileId 字段）
+     */
+    suspend fun copySave(
+        shareKey: String,
+        sharePwd: String,
+        file: ShareFile,
+        toDirFid: String,
+        token: String
+    ): Pair<Long, String>? = withContext(Dispatchers.IO) {
+        val shareId = shareIdOf(file)
+        if (shareId.isBlank()) throw IllegalStateException("无法识别分享 ID（缺少 S3KeyFlag）")
+        val (s3KeyFlag, etag, storageNode) = decodeToken(file.fidToken)
+        val fileId = file.fid.toLongOrNull() ?: 0L
+        val parentId = toDirFid.toLongOrNull() ?: 0L
+        val body = JSONObject()
+            .put(
+                "fileList",
+                JSONArray().put(
+                    JSONObject()
+                        .put("fileID", fileId)
+                        .put("fileId", fileId)
+                        .put("size", file.fsize)
+                        .put("etag", etag)
+                        .put("type", if (file.isdir) 1 else 0)
+                        .put("parentFileID", parentId)
+                        .put("parentFileId", parentId)
+                        .put("fileName", file.fname)
+                        .put("driveID", 0)
+                        .put("driveId", 0)
+                        .put("s3keyFlag", s3KeyFlag)
+                        .put("S3KeyFlag", s3KeyFlag)
+                        .put("StorageNode", storageNode)
+                )
+            )
+            .put("shareKey", shareKey)
+            // 无提取码发空串 ""，不要发 null（文档 §4.3）
+            .put("sharePwd", sharePwd.ifBlank { "" })
+            .put("currentLevel", 1)
+            .put("superAdmin", JSONObject.NULL)
+        val request = Request.Builder()
+            .url("https://$shareId.mshare.123pan.cn/b/api/restful/goapi/v1/file/copy/save")
+            .header("Authorization", "Bearer $token")
+            .header("LoginUuid", loginuuid)
+            .header("platform", Pan123Constants.PLATFORM_WEB)
+            .header("Content-Type", "application/json;charset=UTF-8")
+            .header("User-Agent", Pan123Constants.DART_UA)
+            .post(body.toString().toRequestBody(jsonMediaType))
+            .build()
+        val json = executeJson(request)
+        checkOk(json, "转存失败")
+        val taskId = json.optJSONObject("data")?.optLong("taskID") ?: return@withContext null
+        taskId to shareId
+    }
+
+    /**
+     * 轮询转存任务结果（GET copy/save/get?taskID=，同样无需签名）。
+     * @return 转存成功后的新 fileId（无法解析时返回 taskId 字符串兜底）；超时返回 null
+     */
+    suspend fun pollCopySave(taskId: Long, shareId: String, token: String): String? = withContext(Dispatchers.IO) {
+        repeat(15) {
+            kotlinx.coroutines.delay(1000)
+            val url =
+                "https://$shareId.mshare.123pan.cn/b/api/restful/goapi/v1/file/copy/save/get?taskID=$taskId"
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .header("LoginUuid", loginuuid)
+                .header("platform", Pan123Constants.PLATFORM_WEB)
+                .header("User-Agent", Pan123Constants.DART_UA)
+                .get()
+                .build()
+            val json = executeJson(request)
+            if (json.optInt("code", -1) != 0) {
+                // 任务失败/异常：读取 message 抛错（若只是进行中则继续轮询）
+                val msg = json.optString("message")
+                if (msg.isNotBlank()) throw IllegalStateException("转存失败：$msg")
+                return@repeat
+            }
+            val data = json.optJSONObject("data") ?: return@repeat
+            // 完成标志（响应格式未在抓包完整呈现，容错多种形态）：
+            val status = data.optInt("status", -1)
+            val state = data.optString("state").lowercase()
+            val done = data.optBoolean("finished", false) ||
+                status == 2 || status == 3 ||
+                state == "success" || state == "done" || state == "2" ||
+                data.has("fileId") || data.has("FileId") || data.has("newFileId")
+            if (done) {
+                return@withContext data.optString("newFileId")
+                    .ifBlank { data.optString("FileId") }
+                    .ifBlank { data.optString("fileId") }
+                    .ifBlank { taskId.toString() }
+            }
+        }
+        null
+    }
+
+    /** 从分享列表项提取数值 ShareId（S3KeyFlag 形如 "1816216065-0"，前缀即 mshare 子域数字） */
+    private fun shareIdOf(file: ShareFile): String {
+        val s3 = file.fidToken.substringBefore('|')
+        return s3.substringBefore('-')
+    }
+
     /** 删除（移入回收站）：POST /b/api/file/trash */
     suspend fun deleteFiles(files: List<ShareFile>, token: String) = withContext(Dispatchers.IO) {
         val list = JSONArray()
         files.forEach { f ->
-            val (s3, etag) = decodeToken(f.fidToken)
+            val (s3, etag, _) = decodeToken(f.fidToken)
             list.put(
                 JSONObject()
                     .put("FileId", f.fid.toLongOrNull() ?: 0L)
@@ -393,8 +499,8 @@ class Pan123Api(
                         fsize = item.optLong("Size"),
                         isdir = type == 1,
                         pdirFid = item.optString("ParentFileId"),
-                        // 123 下载需要 S3KeyFlag + Etag，编码进 fidToken："S3KeyFlag|Etag"（目录无 Etag 用空）
-                        fidToken = "${item.optString("S3KeyFlag")}|${item.optString("Etag")}",
+                        // 123 下载/转存需要 S3KeyFlag + Etag + StorageNode，编码进 fidToken："S3KeyFlag|Etag|StorageNode"
+                        fidToken = "${item.optString("S3KeyFlag")}|${item.optString("Etag")}|${item.optString("StorageNode")}",
                         modifyTime = item.optString("UpdateAt")
                     )
                 )
@@ -402,12 +508,14 @@ class Pan123Api(
         }
     }
 
-    /** 解码 fidToken（"S3KeyFlag|Etag"） */
-    private fun decodeToken(fidToken: String): Pair<String, String> {
-        if (fidToken.isBlank()) return "" to ""
-        val idx = fidToken.indexOf('|')
-        if (idx < 0) return fidToken to ""
-        return fidToken.substring(0, idx) to fidToken.substring(idx + 1)
+    /** 解码 fidToken（"S3KeyFlag|Etag|StorageNode"；旧格式两段时 StorageNode 为空） */
+    private fun decodeToken(fidToken: String): Triple<String, String, String> {
+        val parts = fidToken.split('|')
+        return Triple(
+            parts.getOrNull(0) ?: "",
+            parts.getOrNull(1) ?: "",
+            parts.getOrNull(2) ?: ""
+        )
     }
 
     /** 解码 download-v2 包装 URL 的 params（Base64 URL-safe）→ 真实 CDN 文件 URL（文档 §5.3.1） */

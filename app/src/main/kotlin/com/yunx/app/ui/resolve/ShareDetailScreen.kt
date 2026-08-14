@@ -67,11 +67,13 @@ import com.yunx.app.ui.items.MultiSelectAction
 import com.yunx.app.ui.items.MultiSelectBar
 import com.yunx.app.ui.screens.BaiduSaveSheet
 import com.yunx.app.ui.screens.C139SaveSheet
+import com.yunx.app.ui.screens.Pan123SaveSheet
 import com.yunx.app.ui.screens.SaveToCloudSheet
 import com.yunx.app.ui.screens.UCSaveSheet
 import com.yunx.app.ui.screens.XunleiSaveSheet
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
 import com.yunx.app.ui.viewmodel.C139CloudViewModel
+import com.yunx.app.ui.viewmodel.Pan123CloudViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
 import com.yunx.app.ui.viewmodel.UCCoudViewModel
@@ -99,6 +101,8 @@ fun ShareDetailScreen(
     c139CloudViewModel: C139CloudViewModel,
     /** UC 网盘云盘浏览 ViewModel（UC 分享转存目录选择用） */
     ucCloudViewModel: UCCoudViewModel,
+    /** 123 网盘云盘浏览 ViewModel（123 分享转存目录选择用） */
+    pan123CloudViewModel: Pan123CloudViewModel,
     scrollBehavior: TopAppBarScrollBehavior,
     /** 顶部左上角返回：退出文件页回到输入页（输入框内容保留） */
     onExit: () -> Unit,
@@ -352,6 +356,11 @@ fun ShareDetailScreen(
             viewModel.isSaveUC -> UCSaveSheet(
                 resolveViewModel = viewModel,
                 cloudViewModel = ucCloudViewModel,
+                onDismiss = { viewModel.dismissSave() }
+            )
+            viewModel.isSavePan123 -> Pan123SaveSheet(
+                resolveViewModel = viewModel,
+                cloudViewModel = pan123CloudViewModel,
                 onDismiss = { viewModel.dismissSave() }
             )
             else -> SaveToCloudSheet(

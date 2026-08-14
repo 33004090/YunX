@@ -88,13 +88,14 @@ class ResolveViewModel(
     var saveMessage by mutableStateOf<String?>(null)
         private set
 
-    /** 当前分享是否支持转存（夸克 / UC / 迅雷 / 百度 / 139） */
+    /** 当前分享是否支持转存（夸克 / UC / 迅雷 / 百度 / 139 / 123） */
     val canSave: Boolean
         get() = currentPlatform == SharePlatform.QUARK ||
             currentPlatform == SharePlatform.UC ||
             currentPlatform == SharePlatform.XUNLEI ||
             currentPlatform == SharePlatform.BAIDU ||
-            currentPlatform == SharePlatform.C139
+            currentPlatform == SharePlatform.C139 ||
+            currentPlatform == SharePlatform.PAN123
 
     /** 当前分享是否为迅雷（UI 选择迅雷版转存目录选择器） */
     val isSaveXunlei: Boolean
@@ -115,6 +116,10 @@ class ResolveViewModel(
     /** 当前分享是否为 UC（UI 选择 UC 版转存目录选择器） */
     val isSaveUC: Boolean
         get() = currentPlatform == SharePlatform.UC
+
+    /** 当前分享是否为 123（UI 选择 123 版转存目录选择器） */
+    val isSavePan123: Boolean
+        get() = currentPlatform == SharePlatform.PAN123
 
     /** 请求转存：记录目标文件并打开目录选择弹窗 */
     fun requestSave(file: ShareFile) {
@@ -200,9 +205,20 @@ class ResolveViewModel(
                             }
                     }
                     SharePlatform.PAN123 -> {
-                        // 123 分享下载无需转存（copy/save 签名待验证，文档 §4.3）
-                        saveMessage = "123 分享无需转存即可下载"
-                        saveTarget = null
+                        // 123 保存到个人盘：copy/save（mshare 无需签名）+ 轮询 task
+                        val credential = currentCredential()
+                        if (credential.isNullOrBlank()) {
+                            saveMessage = "请先登录123网盘"
+                            return@launch
+                        }
+                        pan123ResolveRepository.transferFile(s, file, toDirFid, credential)
+                            .onSuccess {
+                                saveMessage = "已保存到123网盘"
+                                saveTarget = null
+                            }
+                            .onFailure {
+                                saveMessage = it.message ?: "转存失败"
+                            }
                     }
                     else -> {
                         val credential = currentCredential()
@@ -303,8 +319,8 @@ class ResolveViewModel(
                                 ucResolveRepository.transferFile(s, file, UCConstants.DEFAULT_PDIR_FID, credential)
                             }
                             SharePlatform.PAN123 -> {
-                                // 123 分享下载无需转存
-                                throw UnsupportedOperationException("123 分享无需转存")
+                                // 123 批量转存到根目录（fileId "0"）
+                                pan123ResolveRepository.transferFile(s, file, "0", credential)
                             }
                             else -> {
                                 resolveRepository.saveToCloud(s, file, QuarkConstants.DEFAULT_PDIR_FID, credential)

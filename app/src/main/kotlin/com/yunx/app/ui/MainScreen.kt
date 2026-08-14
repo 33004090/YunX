@@ -514,7 +514,8 @@ fun MainScreen() {
                             xunleiCloudViewModel,
                             baiduCloudViewModel,
                             c139CloudViewModel,
-                            ucCloudViewModel
+                            ucCloudViewModel,
+                            pan123CloudViewModel
                         )
                         MainTab.Drive -> DriveScreen(
                             scrollBehavior = scrollBehavior,
