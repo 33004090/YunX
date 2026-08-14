@@ -1,0 +1,485 @@
+package com.yunx.app.data.network
+
+import android.util.Base64
+import com.yunx.app.data.network.model.DownloadLink
+import com.yunx.app.data.network.model.QuotaInfo
+import com.yunx.app.data.network.model.ShareFile
+import com.yunx.app.data.network.model.ShareInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.URLEncoder
+import java.util.Calendar
+import java.util.TimeZone
+import java.util.concurrent.ThreadLocalRandom
+import java.util.zip.CRC32
+
+/**
+ * 123 网盘 API 封装（OkHttp，依据《123网盘API文档_面向Agent.md》）。
+ *
+ * 鉴权体系（文档 §3.2 / §6）：
+ * - 登录 `user.123pan.cn/api/user/sign_in`：无需签名，返回 JWT（data.token）；
+ * - 分享列表 `yun.123pan.cn/b/api/share/get`：匿名、无需签名；
+ * - 其余 yun.123pan.cn / www.123865.com 鉴权请求：必须带 `auth-key` / `auth-value` 签名头
+ *   （CRC32 派生，算法已抓包实证 + 实时验证，见 [makeSign]）。
+ *
+ * 下载流程（文档 §4.2）：分享文件无需转存——直接拿 ShareKey + FileID + S3KeyFlag + Etag + Size
+ * 换 `DownloadURL`（download-v2 包装），对 params 做 Base64 解码得真实 CDN 直链，下载带 Referer。
+ */
+class Pan123Api(
+    private val client: OkHttpClient = OkHttpClient()
+) {
+
+    private val jsonMediaType = "application/json;charset=UTF-8".toMediaType()
+
+    /** 设备标识（文档 §3.2：同一会话内不变、不参与签名；进程级固定即可） */
+    private val loginuuid: String = Pan123Constants.newLoginUuid()
+
+    // ---------- 签名算法（文档 §6，已抓包逐字还原 + 实时验证） ----------
+
+    /** 标准 CRC-32（IEEE 802.3）→ 8 位小写十六进制（与 Python zlib.crc32 & 0xFFFFFFFF format 'x' 一致） */
+    private fun crc32Hex(s: String): String {
+        val crc = CRC32()
+        crc.update(s.toByteArray(Charsets.UTF_8))
+        return java.lang.Long.toHexString(crc.value and 0xFFFFFFFFL)
+    }
+
+    /**
+     * 生成 123 网盘签名头（文档 §6.2）：
+     * - auth-key (timeSign) = crc32_hex(替换表映射后的 UTC "YYYYMMDDHHmm"，基准 ts + 57600s = +16h)；
+     * - auth-value = "<ts>-<random>-<crc32_hex(ts|random|path|web|3|auth_key)>"；
+     * 签名内部固定 OS=web / VER=3（与请求头 platform/app-version 无关，文档 §6.3）。
+     * @param path URL 路径：含 /b 前缀、不含 host、不含 query（如 /b/api/share/download/info）
+     */
+    fun makeSign(path: String, ts: Long = System.currentTimeMillis() / 1000): Pair<String, String> {
+        // 1) auth-key (timeSign)：ts + 16h 以 UTC 格式化为 YYYYMMDDHHmm，逐数字替换
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            timeInMillis = (ts + Pan123Constants.SIGN_OFFSET_SECONDS) * 1000L
+        }
+        val minute = String.format(
+            "%04d%02d%02d%02d%02d",
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH) + 1,
+            cal.get(Calendar.DAY_OF_MONTH),
+            cal.get(Calendar.HOUR_OF_DAY),
+            cal.get(Calendar.MINUTE)
+        )
+        val substituted = minute.map { Pan123Constants.SIGN_TABLE[it - '0'] }.joinToString("")
+        val authKey = crc32Hex(substituted)
+
+        // 2) auth-value：ts|random|path|web|3|auth_key 的 crc32
+        val random = ThreadLocalRandom.current().nextInt(0, 10_000_000)
+        val data = "$ts|$random|$path|${Pan123Constants.SIGN_OS}|${Pan123Constants.SIGN_VER}|$authKey"
+        val authValue = "$ts-$random-${crc32Hex(data)}"
+        return authKey to authValue
+    }
+
+    // ---------- 登录（文档 §5.1，无签名） ----------
+
+    /**
+     * 账号密码登录 → data.token（JWT，Bearer）。
+     * 成功判定：`code == 200`（注意不是 0）。
+     */
+    suspend fun login(passport: String, password: String): String = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("passport", passport)
+            .put("password", password)
+            .put("remember", false)
+        val request = Request.Builder()
+            .url(Pan123Constants.LOGIN_URL)
+            .header("Content-Type", "application/json;charset=UTF-8")
+            .header("platform", Pan123Constants.PLATFORM_WEB)
+            .header("app-version", Pan123Constants.APP_VERSION_LOGIN)
+            .header("loginuuid", loginuuid)
+            .header("Origin", Pan123Constants.LOGIN_BASE)
+            .header("Referer", "${Pan123Constants.LOGIN_BASE}/centerlogin?redirect_url=&source_page=website")
+            .header("User-Agent", Pan123Constants.WEB_UA)
+            .post(body.toString().toRequestBody(jsonMediaType))
+            .build()
+        val json = executeJson(request)
+        val code = json.optInt("code", -1)
+        if (code != 200) {
+            throw IllegalStateException(json.optString("message").ifBlank { "登录失败（code=$code）" })
+        }
+        val token = json.optJSONObject("data")?.optString("token").orEmpty()
+        if (token.isBlank()) throw IllegalStateException("登录失败：未返回 token")
+        token
+    }
+
+    // ---------- 用户信息（文档 §5.11） ----------
+
+    /** 校验登录态 + 取昵称：GET /b/api/user/info → data.Nickname；失败返回 null */
+    suspend fun fetchNickname(token: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val json = getAuth(Pan123Constants.USER_INFO_URL, "/b/api/user/info", token)
+            checkOk(json, "获取用户信息失败")
+            json.optJSONObject("data")?.optString("Nickname")?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+    }
+
+    /** 网盘空间详情：GET /b/api/user/info → SpaceUsed / SpacePermanent / SpaceTemp（文档 §5.11） */
+    suspend fun getQuota(token: String): QuotaInfo? = withContext(Dispatchers.IO) {
+        runCatching {
+            val json = getAuth(Pan123Constants.USER_INFO_URL, "/b/api/user/info", token)
+            checkOk(json, "获取空间详情失败")
+            val data = json.optJSONObject("data") ?: return@runCatching null
+            QuotaInfo(
+                used = data.optLong("SpaceUsed"),
+                total = data.optLong("SpacePermanent") + data.optLong("SpaceTemp")
+            )
+        }.getOrNull()
+    }
+
+    // ---------- 分享文件列表（文档 §5.2，匿名、无签名） ----------
+
+    /**
+     * 读取分享文件/目录列表（匿名），支持提取码、翻页、进入子目录。
+     * @return (文件列表, 下一页游标 or null=末页)。文档 §5.2：`Next=="-1"` 无下一页，空串 `""` 表示还有下一页。
+     */
+    suspend fun getShareFiles(
+        shareKey: String,
+        sharePwd: String,
+        parentFileId: String,
+        next: String,
+        page: Int
+    ): Pair<List<ShareFile>, String?> = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append(Pan123Constants.SHARE_GET_URL)
+            append("?shareKey=").append(URLEncoder.encode(shareKey, "UTF-8"))
+            append("&SharePwd=").append(URLEncoder.encode(sharePwd, "UTF-8"))
+            append("&ParentFileId=").append(parentFileId)
+            append("&limit=100")
+            append("&next=").append(next)
+            append("&Page=").append(page)
+            append("&orderBy=file_name")
+            append("&orderDirection=asc")
+        }
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", Pan123Constants.DART_UA)
+            .get()
+            .build()
+        val json = executeJson(request)
+        checkOk(json, "获取文件列表失败")
+        val data = json.optJSONObject("data") ?: return@withContext Pair(emptyList(), null)
+        if (data.optBoolean("Expired", false)) {
+            throw IllegalStateException("分享已失效")
+        }
+        val files = parseInfoList(data)
+        // 文档 §5.2：Next=="-1" 无下一页；空串 "" 表示还有下一页（需继续翻页）；数字为游标
+        val nextCursor = data.optString("Next").takeIf { it != "-1" }
+        Pair(files, nextCursor)
+    }
+
+    // ---------- 分享下载信息（文档 §5.3，需登录+签名） ----------
+
+    /**
+     * 分享文件取下载直链（POST /b/api/share/download/info）。
+     * @param file 列表项（fidToken 编码了 "S3KeyFlag|Etag"）
+     * @param token Bearer JWT
+     * @return 解码后的真实 CDN 直链（下载需带 Referer: https://yun.123pan.cn/）
+     */
+    suspend fun getShareDownloadLink(
+        shareKey: String,
+        file: ShareFile,
+        token: String
+    ): DownloadLink? = withContext(Dispatchers.IO) {
+        val (s3KeyFlag, etag) = decodeToken(file.fidToken)
+        val body = JSONObject()
+            .put("ShareKey", shareKey)
+            .put("FileID", file.fid)
+            .put("S3KeyFlag", s3KeyFlag)
+            .put("Size", file.fsize)
+            .put("Etag", etag)
+        // 签名 path 与请求头一致（含 /b）；分享下载信息走 android 平台头，签名内部仍固定 web/3（文档 §6.3）
+        val json = postAuth(
+            Pan123Constants.SHARE_DOWNLOAD_INFO_URL,
+            "/b/api/share/download/info",
+            body.toString(),
+            token,
+            platform = Pan123Constants.PLATFORM_ANDROID,
+            appVersion = Pan123Constants.APP_VERSION_ANDROID
+        )
+        checkOk(json, "获取下载链接失败")
+        val data = json.optJSONObject("data") ?: return@withContext null
+        val downloadUrl = data.optString("DownloadURL")
+        if (downloadUrl.isBlank()) return@withContext null
+        // download-v2 包装 URL → Base64 解码 params 得真实 CDN 文件 URL（文档 §5.3.1）
+        val realUrl = decodeDownloadUrl(downloadUrl)
+        DownloadLink(
+            fid = file.fid,
+            filename = file.fname,
+            downloadUrl = realUrl ?: downloadUrl,
+            size = file.fsize
+        )
+    }
+
+    // ---------- 个人盘（网盘页，需登录+签名） ----------
+
+    /** 个人盘文件列表：GET /b/api/file/list/new（文档 §5.4）。返回 (文件列表, 下一页游标 or null) */
+    suspend fun listCloudFiles(parentFileId: String, token: String): Pair<List<ShareFile>, String?> =
+        withContext(Dispatchers.IO) {
+            val url = buildString {
+                append(Pan123Constants.FILE_LIST_URL)
+                append("?driveId=0&limit=100&next=0&orderBy=update_time&orderDirection=desc")
+                append("&parentFileId=").append(parentFileId)
+                append("&trashed=false&SearchData=&Page=1&OnlyLookAbnormalFile=0")
+                append("&event=homeListFile&operateType=1&inDirectSpace=false")
+            }
+            val json = getAuth(url, "/b/api/file/list/new", token)
+            checkOk(json, "获取文件列表失败")
+            val data = json.optJSONObject("data") ?: return@withContext Pair(emptyList(), null)
+            val files = parseInfoList(data)
+            val next = data.optString("Next").takeIf { it != "-1" }
+            Pair(files, next)
+        }
+
+    /** 个人盘下载信息：POST /api/file/download_info（注意无 /b/，文档 §5.5）。返回真实直链 */
+    suspend fun getDownloadLink(file: ShareFile, token: String): DownloadLink? = withContext(Dispatchers.IO) {
+        val (s3keyFlag, etag) = decodeToken(file.fidToken)
+        val body = JSONObject()
+            .put("driveId", 0)
+            .put("etag", etag)
+            .put("fileId", file.fid.toLongOrNull() ?: 0L)
+            .put("s3keyFlag", s3keyFlag)
+            .put("type", 0)
+            .put("fileName", file.fname)
+            .put("size", file.fsize)
+        val json = postAuth(
+            Pan123Constants.FILE_DOWNLOAD_INFO_URL,
+            "/api/file/download_info",
+            body.toString(),
+            token
+        )
+        checkOk(json, "获取下载链接失败")
+        val data = json.optJSONObject("data") ?: return@withContext null
+        val url = data.optString("DownloadUrl")
+        if (url.isBlank()) return@withContext null
+        DownloadLink(
+            fid = file.fid,
+            filename = file.fname,
+            downloadUrl = url,
+            size = file.fsize
+        )
+    }
+
+    // ---------- 网盘管理操作（文档 §5.7-5.10） ----------
+
+    /** 删除（移入回收站）：POST /b/api/file/trash */
+    suspend fun deleteFiles(files: List<ShareFile>, token: String) = withContext(Dispatchers.IO) {
+        val list = JSONArray()
+        files.forEach { f ->
+            val (s3, etag) = decodeToken(f.fidToken)
+            list.put(
+                JSONObject()
+                    .put("FileId", f.fid.toLongOrNull() ?: 0L)
+                    .put("FileName", f.fname)
+                    .put("Type", if (f.isdir) 1 else 0)
+                    .put("Size", f.fsize)
+                    .put("S3KeyFlag", s3)
+                    .put("Etag", etag)
+            )
+        }
+        val body = JSONObject()
+            .put("driveId", 0)
+            .put("fileTrashInfoList", list)
+            .put("operation", true)
+            .put("event", "intoRecycle")
+            .put("operatePlace", 1)
+            .put("safeBox", false)
+        val json = postAuth(Pan123Constants.FILE_TRASH_URL, "/b/api/file/trash", body.toString(), token)
+        checkOk(json, "删除失败")
+    }
+
+    /** 重命名：POST /b/api/file/rename */
+    suspend fun renameFile(fileId: String, newName: String, token: String) = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("driveId", 0)
+            .put("fileId", fileId.toLongOrNull() ?: 0L)
+            .put("fileName", newName)
+            .put("duplicate", 1)
+            .put("event", "fileRename")
+            .put("operatePlace", "right")
+            .put("RequestSource", JSONObject.NULL)
+        val json = postAuth(Pan123Constants.FILE_RENAME_URL, "/b/api/file/rename", body.toString(), token)
+        checkOk(json, "重命名失败")
+    }
+
+    /** 移动：POST /b/api/file/mod_pid */
+    suspend fun moveFiles(fileIds: List<String>, toParentFileId: String, token: String) = withContext(Dispatchers.IO) {
+        val list = JSONArray()
+        fileIds.forEach { list.put(JSONObject().put("FileId", it.toLongOrNull() ?: 0L)) }
+        val body = JSONObject()
+            .put("fileIdList", list)
+            .put("parentFileId", toParentFileId.toLongOrNull() ?: 0L)
+            .put("event", "fileMove")
+            .put("operatePlace", 1)
+            .put("RequestSource", JSONObject.NULL)
+        val json = postAuth(Pan123Constants.FILE_MOD_PID_URL, "/b/api/file/mod_pid", body.toString(), token)
+        checkOk(json, "移动失败")
+    }
+
+    /**
+     * 创建分享：POST /b/api/share/create（文档 §5.10）。
+     * @param fileIds 文件/目录 ID 列表（单文件抓包为标量 int，多文件用数组）
+     * @param expiration 过期时间 ISO（永久用 Pan123Constants.EXPIRATION_FOREVER）
+     * @param sharePwd 提取码（null/空 = 无提取码）
+     */
+    suspend fun createShare(
+        fileIds: List<String>,
+        shareName: String,
+        expiration: String,
+        sharePwd: String?,
+        token: String
+    ): ShareInfo = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("driveId", 0)
+            .put("expiration", expiration)
+            .apply {
+                if (fileIds.size == 1) {
+                    put("fileIdList", fileIds[0].toLongOrNull() ?: 0L)
+                } else {
+                    put("fileIdList", JSONArray().apply { fileIds.forEach { put(it.toLongOrNull() ?: 0L) } })
+                }
+            }
+            .put("shareName", shareName)
+            .put("event", "shareCreate")
+            .put("fileNum", fileIds.size)
+            .put("shareModality", 4)
+            .put("trafficLimitSwitch", 1)
+            .put("trafficLimit", 0)
+            .put("trafficSwitch", 1)
+            .put("fillPwdSwitch", 0)
+            .apply { if (!sharePwd.isNullOrBlank()) put("sharePwd", sharePwd) }
+        val json = postAuth(Pan123Constants.SHARE_CREATE_URL, "/b/api/share/create", body.toString(), token)
+        checkOk(json, "创建分享失败")
+        val data = json.optJSONObject("data")
+            ?: throw IllegalStateException("创建分享失败：未返回数据")
+        val shareKey = data.optString("ShareKey")
+        if (shareKey.isBlank()) throw IllegalStateException("创建分享失败：未返回 ShareKey")
+        val linkList = data.optJSONObject("shareLinkList")
+        val shareUrl = linkList?.optJSONArray("list")?.optString(0)
+            ?.takeIf { it.isNotBlank() }
+            ?: linkList?.optString("standBy")
+                ?.takeIf { it.isNotBlank() }
+                ?: "https://www.123pan.com/s/$shareKey"
+        ShareInfo(
+            shareUrl = shareUrl,
+            passcode = sharePwd.orEmpty(),
+            pwdId = shareKey,
+            title = shareName,
+            expiredType = if (expiration == Pan123Constants.EXPIRATION_FOREVER) 1 else 4
+        )
+    }
+
+    // ---------- 内部工具 ----------
+
+    /** 解析响应 InfoList（分享与个人盘结构一致，文档 §5.2/§5.4） */
+    private fun parseInfoList(data: JSONObject): List<ShareFile> {
+        val arr = data.optJSONArray("InfoList") ?: return emptyList()
+        return buildList {
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val type = item.optInt("Type", 0)
+                add(
+                    ShareFile(
+                        fid = item.optString("FileId"),
+                        fname = item.optString("FileName"),
+                        fsize = item.optLong("Size"),
+                        isdir = type == 1,
+                        pdirFid = item.optString("ParentFileId"),
+                        // 123 下载需要 S3KeyFlag + Etag，编码进 fidToken："S3KeyFlag|Etag"（目录无 Etag 用空）
+                        fidToken = "${item.optString("S3KeyFlag")}|${item.optString("Etag")}",
+                        modifyTime = item.optString("UpdateAt")
+                    )
+                )
+            }
+        }
+    }
+
+    /** 解码 fidToken（"S3KeyFlag|Etag"） */
+    private fun decodeToken(fidToken: String): Pair<String, String> {
+        if (fidToken.isBlank()) return "" to ""
+        val idx = fidToken.indexOf('|')
+        if (idx < 0) return fidToken to ""
+        return fidToken.substring(0, idx) to fidToken.substring(idx + 1)
+    }
+
+    /** 解码 download-v2 包装 URL 的 params（Base64 URL-safe）→ 真实 CDN 文件 URL（文档 §5.3.1） */
+    private fun decodeDownloadUrl(downloadUrl: String): String? {
+        val idx = downloadUrl.indexOf("params=")
+        if (idx < 0) return null
+        val params = downloadUrl.substring(idx + "params=".length).substringBefore("&")
+        return runCatching {
+            val normalized = params.replace('-', '+').replace('_', '/')
+            String(Base64.decode(normalized, Base64.DEFAULT), Charsets.UTF_8)
+        }.getOrNull()
+    }
+
+    /** 成功判定：code == 0（登录接口除外，为 200） */
+    private fun checkOk(json: JSONObject, fallback: String) {
+        val code = json.optInt("code", -1)
+        if (code == 0) return
+        val msg = json.optString("message").ifBlank { fallback }
+        throw IllegalStateException("$msg（code=$code）")
+    }
+
+    /** 鉴权 GET（带 auth-key/auth-value 签名头） */
+    private fun getAuth(url: String, path: String, token: String): JSONObject {
+        val (ak, av) = makeSign(path)
+        val request = Request.Builder()
+            .url(url)
+            .header("platform", Pan123Constants.PLATFORM_WEB)
+            .header("app-version", Pan123Constants.APP_VERSION_WEB)
+            .header("authorization", "Bearer $token")
+            .header("loginuuid", loginuuid)
+            .header("auth-key", ak)
+            .header("auth-value", av)
+            .header("User-Agent", Pan123Constants.WEB_UA)
+            .header("Accept", "application/json, text/plain, */*")
+            .get()
+            .build()
+        return executeJson(request)
+    }
+
+    /** 鉴权 POST（带 auth-key/auth-value 签名头；签名内部固定 web/3） */
+    private fun postAuth(
+        url: String,
+        path: String,
+        body: String,
+        token: String,
+        platform: String = Pan123Constants.PLATFORM_WEB,
+        appVersion: String = Pan123Constants.APP_VERSION_WEB
+    ): JSONObject {
+        val (ak, av) = makeSign(path)
+        val request = Request.Builder()
+            .url(url)
+            .header("platform", platform)
+            .header("app-version", appVersion)
+            .header("authorization", "Bearer $token")
+            .header("loginuuid", loginuuid)
+            .header("auth-key", ak)
+            .header("auth-value", av)
+            .header("Content-Type", "application/json;charset=UTF-8")
+            .header("User-Agent", Pan123Constants.WEB_UA)
+            .post(body.toRequestBody(jsonMediaType))
+            .build()
+        return executeJson(request)
+    }
+
+    private fun executeJson(request: Request): JSONObject {
+        client.newCall(request).execute().use { response ->
+            val body = response.body?.string()
+                ?: throw IllegalStateException("请求失败：响应为空（${response.code}）")
+            if (!response.isSuccessful && body.isBlank()) {
+                throw IllegalStateException("请求失败（HTTP ${response.code}）")
+            }
+            return JSONObject(body)
+        }
+    }
+}

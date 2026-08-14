@@ -1,0 +1,86 @@
+package com.yunx.app.data.repository
+
+import com.yunx.app.data.network.Pan123Api
+import com.yunx.app.data.network.ShareLinkParser
+import com.yunx.app.data.network.model.DownloadLink
+import com.yunx.app.data.network.model.ShareFile
+import com.yunx.app.data.network.model.ShareSession
+
+/**
+ * 123 网盘分享解析仓库（依据《123网盘API文档_面向Agent.md》§4.2）：
+ * - createSession：GET /b/api/share/get（匿名，带 SharePwd）校验提取码 + 取标题；
+ * - listFiles：GET /b/api/share/get 翻页（Next=="-1" 末页；空串表示还有下一页）；
+ * - getShareDownloadLink：POST /b/api/share/download/info（需登录 token + 签名）→ 解码 DownloadURL；
+ * - 123 分享下载**无需转存**（类似 UC）：transferFile / ensureTempDir / cleanupTempDir 空实现。
+ * @param tokenProvider 当前登录 token（ResolveViewModel 传 accessToken）
+ */
+class Pan123ResolveRepository(
+    private val api: Pan123Api,
+    private val tokenProvider: suspend () -> String?
+) : ShareResolveRepository {
+
+    override suspend fun createSession(link: String, pwd: String?, cookie: String): Result<ShareSession> {
+        val parsed = ShareLinkParser.parse(link)
+            ?: return Result.failure(IllegalArgumentException("无法识别分享链接"))
+        return runCatching {
+            // 提取码优先级：用户手输 > 链接/文案自带
+            val sharePwd = pwd?.takeIf { it.isNotBlank() } ?: parsed.pwd.orEmpty()
+            // 用分享根目录列表校验提取码 + 取标题（标题用首个目录名/ShareKey 占位，文档待验证 #4）
+            val (files, _) = api.getShareFiles(parsed.shareId, sharePwd, "0", "0", 1)
+            val title = files.firstOrNull()?.fname?.takeIf { it.isNotBlank() } ?: parsed.shareId
+            ShareSession(shareId = parsed.shareId, stoken = sharePwd, title = title)
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(it) }
+        )
+    }
+
+    override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
+        runCatching {
+            // 翻页直到末页（Next=="-1"），上限保护 50 页
+            val all = mutableListOf<ShareFile>()
+            var next = "0"
+            var page = 1
+            do {
+                val (files, nextCursor) = api.getShareFiles(session.shareId, session.stoken, dirFid, next, page)
+                all += files
+                next = nextCursor ?: "-1"
+                page++
+            } while (next != "-1" && page < 50)
+            all
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(it) }
+        )
+
+    /** 123 分享下载无需转存（文档 §4.2） */
+    override suspend fun ensureTempDir(cookie: String): Result<String> =
+        Result.failure(UnsupportedOperationException("123 分享无需转存"))
+
+    /** 123 分享下载无需转存（文档 §4.2）；「保存到网盘」的 copy/save 签名待验证，不实现 */
+    override suspend fun transferFile(
+        session: ShareSession,
+        file: ShareFile,
+        toDirFid: String,
+        cookie: String
+    ): Result<String> = Result.failure(UnsupportedOperationException("123 分享无需转存即可下载"))
+
+    override suspend fun getDownloadLink(fid: String, cookie: String): Result<DownloadLink> =
+        Result.failure(UnsupportedOperationException("123 分享请使用 getShareDownloadLink"))
+
+    override suspend fun getShareDownloadLink(
+        session: ShareSession,
+        file: ShareFile,
+        cookie: String
+    ): Result<DownloadLink> = runCatching {
+        // cookie 参数即登录 token（ResolveViewModel.currentCredential 返回 accessToken）
+        val token = cookie.ifBlank { tokenProvider() ?: "" }
+        if (token.isBlank()) throw IllegalStateException("请先登录123网盘")
+        val link = api.getShareDownloadLink(session.shareId, file, token)
+            ?: throw IllegalStateException("获取下载链接失败")
+        link.copy(filename = file.fname.ifBlank { link.filename })
+    }.fold(
+        onSuccess = { Result.success(it) },
+        onFailure = { Result.failure(it) }
+    )
+}

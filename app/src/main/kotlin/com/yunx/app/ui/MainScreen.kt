@@ -46,6 +46,7 @@ import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.backup.AuthBackupManager
 import com.yunx.app.data.network.BaiduApi
 import com.yunx.app.data.network.C139Api
+import com.yunx.app.data.network.Pan123Api
 import com.yunx.app.data.network.QuarkApi
 import com.yunx.app.data.network.UCApi
 import com.yunx.app.data.network.XunleiApi
@@ -55,6 +56,8 @@ import com.yunx.app.data.repository.BaiduAccountRepository
 import com.yunx.app.data.repository.BaiduResolveRepository
 import com.yunx.app.data.repository.C139AccountRepository
 import com.yunx.app.data.repository.C139ResolveRepository
+import com.yunx.app.data.repository.Pan123AccountRepository
+import com.yunx.app.data.repository.Pan123ResolveRepository
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
 import com.yunx.app.data.repository.UCAccountRepository
@@ -63,6 +66,7 @@ import com.yunx.app.data.repository.XunleiAccountRepository
 import com.yunx.app.data.repository.XunleiResolveRepository
 import com.yunx.app.ui.login.BaiduLoginScreen
 import com.yunx.app.ui.login.C139LoginScreen
+import com.yunx.app.ui.login.Pan123LoginScreen
 import com.yunx.app.ui.login.QuarkLoginScreen
 import com.yunx.app.ui.login.UCLoginScreen
 import com.yunx.app.ui.login.XunleiLoginScreen
@@ -80,6 +84,8 @@ import com.yunx.app.ui.viewmodel.C139AccountViewModel
 import com.yunx.app.ui.viewmodel.C139CloudViewModel
 import com.yunx.app.ui.viewmodel.DownloadViewModel
 import com.yunx.app.ui.viewmodel.DriveQuotaViewModel
+import com.yunx.app.ui.viewmodel.Pan123AccountViewModel
+import com.yunx.app.ui.viewmodel.Pan123CloudViewModel
 import com.yunx.app.ui.viewmodel.QuarkAccountViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.ResolveViewModel
@@ -109,6 +115,7 @@ fun MainScreen() {
     var showXunleiLogin by rememberSaveable { mutableStateOf(false) }
     var showBaiduLogin by rememberSaveable { mutableStateOf(false) }
     var showC139Login by rememberSaveable { mutableStateOf(false) }
+    var showPan123Login by rememberSaveable { mutableStateOf(false) }
     var showAbout by rememberSaveable { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
 
@@ -141,6 +148,7 @@ fun MainScreen() {
     val xunleiApi = remember { XunleiApi() }
     val baiduApi = remember { BaiduApi() }
     val c139Api = remember { C139Api() }
+    val pan123Api = remember { Pan123Api() }
     val db = remember { AppDatabase.get(context) }
     val settings = remember { SettingsRepository(context) }
     val repository = remember {
@@ -158,6 +166,9 @@ fun MainScreen() {
     val c139Repository = remember {
         C139AccountRepository(db.c139AccountDao())
     }
+    val pan123Repository = remember {
+        Pan123AccountRepository(db.pan123AccountDao(), pan123Api)
+    }
     // 网盘认证备份：打包/恢复各平台凭证
     val backupManager = remember {
         AuthBackupManager(
@@ -165,7 +176,8 @@ fun MainScreen() {
             db.ucAccountDao(),
             db.xunleiAccountDao(),
             db.baiduAccountDao(),
-            db.c139AccountDao()
+            db.c139AccountDao(),
+            db.pan123AccountDao()
         )
     }
     // 下载管理器：OkHttp 分片下载器 + Room 任务持久化 + 可配置线程数（设置页动态生效）
@@ -213,6 +225,9 @@ fun MainScreen() {
     )
     val c139ViewModel: C139AccountViewModel = viewModel(
         factory = C139AccountViewModel.Factory(c139Repository)
+    )
+    val pan123ViewModel: Pan123AccountViewModel = viewModel(
+        factory = Pan123AccountViewModel.Factory(pan123Repository)
     )
     // 夸克云盘浏览：作为网盘 Tab 内容展示（非全屏），cookie 直接从数据库读取（避免 StateFlow 初始值为空的竞态）
     val quarkCloudViewModel: QuarkCloudViewModel = viewModel(
@@ -264,7 +279,15 @@ fun MainScreen() {
             downloadManager
         )
     )
-    // 网盘空间详情：网盘页顶部「空间总览」展示 5 平台容量使用
+    // 123 网盘云盘浏览：点击已登录的 123 卡片打开（token 从数据库读取）
+    val pan123CloudViewModel: Pan123CloudViewModel = viewModel(
+        factory = Pan123CloudViewModel.Factory(
+            pan123Api,
+            { pan123Repository.getAccount()?.accessToken },
+            downloadManager
+        )
+    )
+    // 网盘空间详情：网盘页顶部「空间总览」展示 6 平台容量使用
     val driveQuotaViewModel: DriveQuotaViewModel = viewModel(
         factory = DriveQuotaViewModel.Factory(
             api, { repository.getAccount()?.cookie },
@@ -274,7 +297,8 @@ fun MainScreen() {
             { xunleiRepository.getAccount()?.deviceId },
             { xunleiRepository.getAccount()?.captchaToken },
             baiduApi, { baiduRepository.getAccount()?.cookie },
-            c139Api, { c139Repository.getAccount()?.cookie }
+            c139Api, { c139Repository.getAccount()?.cookie },
+            pan123Api, { pan123Repository.getAccount()?.accessToken }
         )
     )
     val xunleiResolveRepository = remember {
@@ -299,6 +323,12 @@ fun MainScreen() {
     val c139ResolveRepository = remember {
         C139ResolveRepository(c139Api)
     }
+    val pan123ResolveRepository = remember {
+        Pan123ResolveRepository(
+            api = pan123Api,
+            tokenProvider = { pan123Repository.getAccount()?.accessToken }
+        )
+    }
     val resolveViewModel: ResolveViewModel = viewModel(
         factory = ResolveViewModel.Factory(
             repository,
@@ -311,6 +341,8 @@ fun MainScreen() {
             baiduResolveRepository,
             c139Repository,
             c139ResolveRepository,
+            pan123Repository,
+            pan123ResolveRepository,
             downloadManager
         )
     )
@@ -322,6 +354,7 @@ fun MainScreen() {
     val xunleiAccount by xunleiViewModel.xunleiAccount.collectAsState()
     val baiduAccount by baiduViewModel.baiduAccount.collectAsState()
     val c139Account by c139ViewModel.c139Account.collectAsState()
+    val pan123Account by pan123ViewModel.pan123Account.collectAsState()
 
     // 解析页发起下载后，自动切换到「下载」Tab
     LaunchedEffect(resolveViewModel.downloadStarted) {
@@ -391,6 +424,16 @@ fun MainScreen() {
             viewModel = c139ViewModel,
             onBack = { showC139Login = false },
             onSaved = { showC139Login = false }
+        )
+        return
+    }
+
+    // 123 登录页：全屏覆盖（账号+密码表单登录换 JWT）
+    if (showPan123Login) {
+        Pan123LoginScreen(
+            viewModel = pan123ViewModel,
+            onBack = { showPan123Login = false },
+            onSaved = { showPan123Login = false }
         )
         return
     }
@@ -480,11 +523,13 @@ fun MainScreen() {
                             xunleiAccount = xunleiAccount,
                             baiduAccount = baiduAccount,
                             c139Account = c139Account,
+                            pan123Account = pan123Account,
                             quarkCloudViewModel = quarkCloudViewModel,
                             ucCloudViewModel = ucCloudViewModel,
                             xunleiCloudViewModel = xunleiCloudViewModel,
                             baiduCloudViewModel = baiduCloudViewModel,
                             c139CloudViewModel = c139CloudViewModel,
+                            pan123CloudViewModel = pan123CloudViewModel,
                             driveQuotaViewModel = driveQuotaViewModel,
                             onQuarkLogin = { showQuarkLogin = true },
                             onQuarkLogout = { viewModel.logout() },
@@ -496,7 +541,9 @@ fun MainScreen() {
                             onBaiduLogin = { showBaiduLogin = true },
                             onBaiduLogout = { baiduViewModel.logout() },
                             onC139Login = { showC139Login = true },
-                            onC139Logout = { c139ViewModel.logout() }
+                            onC139Logout = { c139ViewModel.logout() },
+                            onPan123Login = { showPan123Login = true },
+                            onPan123Logout = { pan123ViewModel.logout() }
                         )
                         MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
                         MainTab.Settings -> SettingsScreen(

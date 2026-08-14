@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.yunx.app.data.network.BaiduApi
 import com.yunx.app.data.network.C139Api
+import com.yunx.app.data.network.Pan123Api
 import com.yunx.app.data.network.QuarkApi
 import com.yunx.app.data.network.UCApi
 import com.yunx.app.data.network.XunleiApi
@@ -30,7 +31,9 @@ class DriveQuotaViewModel(
     private val baiduApi: BaiduApi,
     private val baiduCookie: suspend () -> String?,
     private val c139Api: C139Api,
-    private val c139Cookie: suspend () -> String?
+    private val c139Cookie: suspend () -> String?,
+    private val pan123Api: Pan123Api,
+    private val pan123Token: suspend () -> String?
 ) : ViewModel() {
 
     private val _quarkQuota = MutableStateFlow<QuotaInfo?>(null)
@@ -47,6 +50,9 @@ class DriveQuotaViewModel(
 
     private val _c139Quota = MutableStateFlow<QuotaInfo?>(null)
     val c139Quota: StateFlow<QuotaInfo?> = _c139Quota.asStateFlow()
+
+    private val _pan123Quota = MutableStateFlow<QuotaInfo?>(null)
+    val pan123Quota: StateFlow<QuotaInfo?> = _pan123Quota.asStateFlow()
 
     /** 是否加载中 */
     val loading = MutableStateFlow(false)
@@ -82,6 +88,11 @@ class DriveQuotaViewModel(
             if (c139 != null) {
                 _c139Quota.value = runCatching { c139Api.getQuota(c139) }.getOrNull()
             }
+            // 123
+            val p123 = pan123Token()
+            if (p123 != null) {
+                _pan123Quota.value = runCatching { pan123Api.getQuota(p123) }.getOrNull()
+            }
             loading.value = false
         }
     }
@@ -98,7 +109,9 @@ class DriveQuotaViewModel(
         private val baiduApi: BaiduApi,
         private val baiduCookie: suspend () -> String?,
         private val c139Api: C139Api,
-        private val c139Cookie: suspend () -> String?
+        private val c139Cookie: suspend () -> String?,
+        private val pan123Api: Pan123Api,
+        private val pan123Token: suspend () -> String?
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
@@ -107,7 +120,8 @@ class DriveQuotaViewModel(
                 ucApi, ucCookie,
                 xunleiApi, xunleiToken, xunleiDeviceId, xunleiCaptcha,
                 baiduApi, baiduCookie,
-                c139Api, c139Cookie
+                c139Api, c139Cookie,
+                pan123Api, pan123Token
             ) as T
     }
 }

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.network.BaiduConstants
 import com.yunx.app.data.network.C139Constants
+import com.yunx.app.data.network.Pan123Constants
 import com.yunx.app.data.network.QuarkConstants
 import com.yunx.app.data.network.QuarkCdn
 import com.yunx.app.data.network.ShareLinkParser
@@ -23,6 +24,8 @@ import com.yunx.app.data.repository.BaiduAccountRepository
 import com.yunx.app.data.repository.BaiduResolveRepository
 import com.yunx.app.data.repository.C139AccountRepository
 import com.yunx.app.data.repository.C139ResolveRepository
+import com.yunx.app.data.repository.Pan123AccountRepository
+import com.yunx.app.data.repository.Pan123ResolveRepository
 import com.yunx.app.data.repository.QuarkAccountRepository
 import com.yunx.app.data.repository.QuarkResolveRepository
 import com.yunx.app.data.repository.ShareResolveRepository
@@ -55,6 +58,8 @@ class ResolveViewModel(
     private val baiduResolveRepository: BaiduResolveRepository,
     private val c139AccountRepository: C139AccountRepository,
     private val c139ResolveRepository: C139ResolveRepository,
+    private val pan123AccountRepository: Pan123AccountRepository,
+    private val pan123ResolveRepository: Pan123ResolveRepository,
     private val downloadManager: DownloadManager
 ) : ViewModel() {
 
@@ -194,6 +199,11 @@ class ResolveViewModel(
                                 saveMessage = it.message ?: "转存失败"
                             }
                     }
+                    SharePlatform.PAN123 -> {
+                        // 123 分享下载无需转存（copy/save 签名待验证，文档 §4.3）
+                        saveMessage = "123 分享无需转存即可下载"
+                        saveTarget = null
+                    }
                     else -> {
                         val credential = currentCredential()
                         if (credential.isNullOrBlank()) {
@@ -291,6 +301,10 @@ class ResolveViewModel(
                             SharePlatform.UC -> {
                                 // UC 批量转存到根目录（pdir_fid "0"）
                                 ucResolveRepository.transferFile(s, file, UCConstants.DEFAULT_PDIR_FID, credential)
+                            }
+                            SharePlatform.PAN123 -> {
+                                // 123 分享下载无需转存
+                                throw UnsupportedOperationException("123 分享无需转存")
                             }
                             else -> {
                                 resolveRepository.saveToCloud(s, file, QuarkConstants.DEFAULT_PDIR_FID, credential)
@@ -398,12 +412,13 @@ class ResolveViewModel(
     /** 当前解析平台（QUARK / UC / XUNLEI），由链接自动检测 */
     private var currentPlatform: SharePlatform = SharePlatform.QUARK
 
-    /** 当前平台凭证（夸克/UC/百度用 cookie，迅雷用 access_token，139 用 cookie） */
+    /** 当前平台凭证（夸克/UC/百度/139 用 cookie，迅雷/123 用 access_token） */
     private suspend fun currentCredential(): String? = when (currentPlatform) {
         SharePlatform.UC -> ucAccountRepository.getAccount()?.cookie
         SharePlatform.XUNLEI -> xunleiAccountRepository.getAccount()?.accessToken
         SharePlatform.BAIDU -> baiduAccountRepository.getAccount()?.cookie
         SharePlatform.C139 -> c139AccountRepository.getAccount()?.cookie
+        SharePlatform.PAN123 -> pan123AccountRepository.getAccount()?.accessToken
         else -> accountRepository.getAccount()?.cookie
     }
 
@@ -412,6 +427,7 @@ class ResolveViewModel(
         SharePlatform.XUNLEI -> xunleiResolveRepository
         SharePlatform.BAIDU -> baiduResolveRepository
         SharePlatform.C139 -> c139ResolveRepository
+        SharePlatform.PAN123 -> pan123ResolveRepository
         else -> resolveRepository
     }
 
@@ -420,6 +436,7 @@ class ResolveViewModel(
         SharePlatform.XUNLEI -> "0"
         SharePlatform.BAIDU -> ""
         SharePlatform.C139 -> "0"
+        SharePlatform.PAN123 -> "0"
         else -> QuarkConstants.DEFAULT_PDIR_FID
     }
 
@@ -428,6 +445,7 @@ class ResolveViewModel(
         SharePlatform.XUNLEI -> "迅雷网盘"
         SharePlatform.BAIDU -> "百度网盘"
         SharePlatform.C139 -> "139 网盘"
+        SharePlatform.PAN123 -> "123网盘"
         else -> "夸克网盘"
     }
 
@@ -580,8 +598,9 @@ class ResolveViewModel(
         val isXunlei = currentPlatform == SharePlatform.XUNLEI
         val isBaidu = currentPlatform == SharePlatform.BAIDU
         val isC139 = currentPlatform == SharePlatform.C139
+        val isPan123 = currentPlatform == SharePlatform.PAN123
         val isQuark = currentPlatform == SharePlatform.QUARK
-        // 迅雷直链 URL 自带签名，无需 Cookie；夸克/UC/百度需 Cookie + UA；139 直链为 CDN 签名地址
+        // 迅雷直链 URL 自带签名，无需 Cookie；夸克/UC/百度需 Cookie + UA；139 直链为 CDN 签名地址；123 直链需 Referer
         val headers = when {
             isXunlei -> mapOf("User-Agent" to XunleiConstants.APP_UA) // 迅雷直链必须用官方 app UA，浏览器 UA 会触发 CDN 降级（200整文件）
             isBaidu -> mapOf(
@@ -589,6 +608,11 @@ class ResolveViewModel(
                 "User-Agent" to BaiduConstants.UA_NETDISK
             )
             isC139 -> mapOf("User-Agent" to C139Constants.PC_UA)
+            // 123 分享/个人盘直链为 CDN 签名地址，下载必须带 Referer（文档 §5.3.1）
+            isPan123 -> mapOf(
+                "User-Agent" to Pan123Constants.WEB_UA,
+                "Referer" to Pan123Constants.DOWNLOAD_REFERER
+            )
             // UC：OSS 直链按 Referer 档位限速（缺 Referer 被 Callback 限到 ~100 KB/s），
             // 补官方 Web 客户端同款 Referer/Origin 即满速
             isUC -> mapOf(
@@ -664,6 +688,8 @@ class ResolveViewModel(
         private val baiduResolveRepository: BaiduResolveRepository,
         private val c139AccountRepository: C139AccountRepository,
         private val c139ResolveRepository: C139ResolveRepository,
+        private val pan123AccountRepository: Pan123AccountRepository,
+        private val pan123ResolveRepository: Pan123ResolveRepository,
         private val downloadManager: DownloadManager
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -675,6 +701,7 @@ class ResolveViewModel(
                 xunleiAccountRepository, xunleiResolveRepository,
                 baiduAccountRepository, baiduResolveRepository,
                 c139AccountRepository, c139ResolveRepository,
+                pan123AccountRepository, pan123ResolveRepository,
                 downloadManager
             ) as T
         }

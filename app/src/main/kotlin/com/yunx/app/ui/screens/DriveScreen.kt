@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.db.BaiduAccountEntity
 import com.yunx.app.data.db.C139AccountEntity
+import com.yunx.app.data.db.Pan123AccountEntity
 import com.yunx.app.data.db.QuarkAccountEntity
 import com.yunx.app.data.db.UCAccountEntity
 import com.yunx.app.data.db.XunleiAccountEntity
@@ -60,6 +61,7 @@ import com.yunx.app.data.network.model.QuotaInfo
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
 import com.yunx.app.ui.viewmodel.C139CloudViewModel
 import com.yunx.app.ui.viewmodel.DriveQuotaViewModel
+import com.yunx.app.ui.viewmodel.Pan123CloudViewModel
 import com.yunx.app.ui.viewmodel.QuarkCloudViewModel
 import com.yunx.app.ui.viewmodel.UCCoudViewModel
 import com.yunx.app.ui.viewmodel.XunleiCloudViewModel
@@ -90,6 +92,7 @@ fun DriveScreen(
     xunleiAccount: XunleiAccountEntity?,
     baiduAccount: BaiduAccountEntity?,
     c139Account: C139AccountEntity?,
+    pan123Account: Pan123AccountEntity?,
     /** 夸克云盘浏览 ViewModel（网盘 Tab 内切换展示，非全屏） */
     quarkCloudViewModel: QuarkCloudViewModel,
     /** UC 网盘云盘浏览 ViewModel */
@@ -100,6 +103,8 @@ fun DriveScreen(
     baiduCloudViewModel: BaiduCloudViewModel,
     /** 139 网盘云盘浏览 ViewModel */
     c139CloudViewModel: C139CloudViewModel,
+    /** 123 网盘云盘浏览 ViewModel */
+    pan123CloudViewModel: Pan123CloudViewModel,
     /** 网盘空间详情 ViewModel（顶部空间总览） */
     driveQuotaViewModel: DriveQuotaViewModel,
     onQuarkLogin: () -> Unit,
@@ -114,6 +119,8 @@ fun DriveScreen(
     onBaiduLogout: () -> Unit,
     onC139Login: () -> Unit,
     onC139Logout: () -> Unit,
+    onPan123Login: () -> Unit,
+    onPan123Logout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showQuarkSheet by remember { mutableStateOf(false) }
@@ -121,6 +128,7 @@ fun DriveScreen(
     var showXunleiSheet by remember { mutableStateOf(false) }
     var showBaiduSheet by remember { mutableStateOf(false) }
     var showC139Sheet by remember { mutableStateOf(false) }
+    var showPan123Sheet by remember { mutableStateOf(false) }
     // 夸克云盘浏览：网盘 Tab 内切换（非全屏），切 Tab 再回来仍保留
     var showCloud by rememberSaveable { mutableStateOf(false) }
     // UC 网盘云盘浏览：网盘 Tab 内切换（非全屏）
@@ -131,6 +139,8 @@ fun DriveScreen(
     var showBaiduCloud by rememberSaveable { mutableStateOf(false) }
     // 139 网盘云盘浏览：网盘 Tab 内切换（非全屏）
     var showC139Cloud by rememberSaveable { mutableStateOf(false) }
+    // 123 网盘云盘浏览：网盘 Tab 内切换（非全屏）
+    var showPan123Cloud by rememberSaveable { mutableStateOf(false) }
 
     // 夸克：登录态由数据库驱动；已登录则副标题显示昵称
     val quark = DriveAccount(
@@ -168,6 +178,13 @@ fun DriveScreen(
         avatarText = "139",
         isLoggedIn = c139Account != null
     )
+    val pan123 = DriveAccount(
+        id = "pan123",
+        name = "123网盘",
+        description = pan123Account?.nickname ?: "点击登录，支持解析下载",
+        avatarText = "123",
+        isLoggedIn = pan123Account != null
+    )
     val others = remember {
         emptyList<DriveAccount>()
     }
@@ -177,7 +194,7 @@ fun DriveScreen(
         driveQuotaViewModel.loadAll()
     }
 
-    // 账号列表 ↔ 夸克云盘 ↔ UC 云盘 ↔ 迅雷云盘：平滑过渡（淡入 + 轻微缩放，不僵硬）
+    // 账号列表 ↔ 夸克云盘 ↔ UC 云盘 ↔ 迅雷云盘 ↔ 百度云盘 ↔ 139 云盘 ↔ 123 云盘：平滑过渡（淡入 + 轻微缩放，不僵硬）
     AnimatedContent(
         targetState = when {
             showCloud -> 1
@@ -185,6 +202,7 @@ fun DriveScreen(
             showXunleiCloud -> 3
             showBaiduCloud -> 4
             showC139Cloud -> 5
+            showPan123Cloud -> 6
             else -> 0
         },
         transitionSpec = {
@@ -222,6 +240,12 @@ fun DriveScreen(
             viewModel = c139CloudViewModel,
             scrollBehavior = scrollBehavior,
             onExit = { showC139Cloud = false },
+            onDownloadStarted = onDownloadStarted
+        )
+        6 -> Pan123CloudScreen(
+            viewModel = pan123CloudViewModel,
+            scrollBehavior = scrollBehavior,
+            onExit = { showPan123Cloud = false },
             onDownloadStarted = onDownloadStarted
         )
             else -> LazyColumn(
@@ -319,6 +343,22 @@ fun DriveScreen(
                         }
                     )
                 }
+                item(key = pan123.id) {
+                    DriveAccountCard(
+                        account = pan123,
+                        quota = driveQuotaViewModel.pan123Quota.collectAsState().value,
+                        onClick = if (pan123.isLoggedIn) {
+                            { showPan123Cloud = true }
+                        } else {
+                            onPan123Login
+                        },
+                        onMoreClick = if (pan123.isLoggedIn) {
+                            { showPan123Sheet = true }
+                        } else {
+                            null
+                        }
+                    )
+                }
                 items(others, key = { it.id }) { account ->
                     DriveAccountCard(account = account)
                 }
@@ -383,6 +423,18 @@ fun DriveScreen(
                 showC139Sheet = false
             },
             onDismiss = { showC139Sheet = false }
+        )
+    }
+
+    // 已登录 123：点击卡片弹出账号信息底部弹窗
+    if (showPan123Sheet && pan123Account != null) {
+        Pan123AccountSheet(
+            account = pan123Account,
+            onLogout = {
+                onPan123Logout()
+                showPan123Sheet = false
+            },
+            onDismiss = { showPan123Sheet = false }
         )
     }
 }
