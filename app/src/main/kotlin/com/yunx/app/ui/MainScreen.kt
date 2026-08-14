@@ -77,6 +77,7 @@ import com.yunx.app.ui.screens.DriveScreen
 import com.yunx.app.ui.screens.OnboardingScreen
 import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
+import com.yunx.app.ui.screens.SupportScreen
 import com.yunx.app.ui.screens.UpdateDialog
 import com.yunx.app.ui.viewmodel.BaiduAccountViewModel
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
@@ -117,6 +118,7 @@ fun MainScreen() {
     var showC139Login by rememberSaveable { mutableStateOf(false) }
     var showPan123Login by rememberSaveable { mutableStateOf(false) }
     var showAbout by rememberSaveable { mutableStateOf(false) }
+    var showSupport by rememberSaveable { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
@@ -552,6 +554,7 @@ fun MainScreen() {
                             downloadThreads = settings.downloadThreads,
                             onThreadsChange = { settings.downloadThreads = it },
                             onAboutClick = { showAbout = true },
+                            onSupportClick = { showSupport = true },
                             backupManager = backupManager
                         )
                     }
@@ -577,6 +580,18 @@ fun MainScreen() {
                 showAbout = false
                 showOnboarding = true
             }
+        )
+    }
+
+    // 支持开发：叠加覆盖层（淡入 + 轻微缩放过渡）
+    AnimatedVisibility(
+        visible = showSupport,
+        enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.96f),
+        exit = fadeOut(tween(160)) + scaleOut(tween(160), targetScale = 0.96f),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        SupportScreen(
+            onBack = { showSupport = false }
         )
     }
     }

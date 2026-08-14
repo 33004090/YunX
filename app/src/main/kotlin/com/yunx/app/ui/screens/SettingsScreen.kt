@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.VolunteerActivism
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -65,6 +66,7 @@ fun SettingsScreen(
     downloadThreads: Int,
     onThreadsChange: (Int) -> Unit,
     onAboutClick: () -> Unit,
+    onSupportClick: () -> Unit,
     backupManager: AuthBackupManager,
     modifier: Modifier = Modifier
 ) {
@@ -174,6 +176,14 @@ fun SettingsScreen(
             title = "关于云析",
             description = "版本信息、支持平台与技术说明",
             onClick = onAboutClick
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsItem(
+            icon = Icons.Outlined.VolunteerActivism,
+            title = "支持开发",
+            description = "微信扫码捐赠，支持项目持续维护",
+            onClick = onSupportClick
         )
     }
 
