@@ -235,11 +235,13 @@ class Pan123Api(
         val downloadUrl = data.optString("DownloadURL")
         if (downloadUrl.isBlank()) return@withContext null
         // download-v2 包装 URL → Base64 解码 params 得真实 CDN 文件 URL（文档 §5.3.1）
-        val realUrl = decodeDownloadUrl(downloadUrl)
+        val decoded = decodeDownloadUrl(downloadUrl) ?: downloadUrl
+        // 同样循环跟随可能存在的 redirect_url（auto_redirect=0）
+        val realUrl = followRedirectUrl(decoded)
         DownloadLink(
             fid = file.fid,
             filename = file.fname,
-            downloadUrl = realUrl ?: downloadUrl,
+            downloadUrl = realUrl,
             size = file.fsize
         )
     }
@@ -283,8 +285,15 @@ class Pan123Api(
         )
         checkOk(json, "获取下载链接失败")
         val data = json.optJSONObject("data") ?: return@withContext null
-        val url = data.optString("DownloadUrl")
-        if (url.isBlank()) return@withContext null
+        val raw = data.optString("DownloadUrl")
+        if (raw.isBlank()) return@withContext null
+        // ★ 个人盘同样存在 download-v2?params=<base64> 包装（Web 平台头触发，Web 中转页不是可下载直链）：
+        //   统一过 decodeDownloadUrl——能解码就给真实 CDN 直链；直链形态 decode 返回 null 回退 raw。
+        //   绝不能用 startsWith("http") 短路：中转页 URL 同样以 http 开头，无法区分。
+        val decoded = decodeDownloadUrl(raw) ?: raw
+        // ★ 解码直链带 auto_redirect=0 时，CDN 返回 JSON（data.redirect_url）而非直接文件：
+        //   取链阶段循环跟随 redirect_url，交给下载引擎的必须是最终可下载地址。
+        val url = followRedirectUrl(decoded)
         DownloadLink(
             fid = file.fid,
             filename = file.fname,
@@ -543,16 +552,66 @@ class Pan123Api(
         )
     }
 
-    /** 解码 download-v2 包装 URL 的 params（Base64 URL-safe）→ 真实 CDN 文件 URL（文档 §5.3.1） */
+    /** 解码 123 下载 URL（兼容两种形态，文档 §5.3.1）：
+     *  - 形态 1：整段 base64（alist 风格）→ 直接解码
+     *  - 形态 2：download-v2?params=<base64 URL-safe> → 解码 params
+     */
     private fun decodeDownloadUrl(downloadUrl: String): String? {
-        val idx = downloadUrl.indexOf("params=")
+        val trimmed = downloadUrl.trim()
+        // 形态 1：整段 base64（不含协议头的串）
+        if (!trimmed.contains("://")) {
+            return runCatching {
+                String(Base64.decode(trimmed, Base64.DEFAULT), Charsets.UTF_8)
+                    .takeIf { it.startsWith("http", ignoreCase = true) }
+            }.getOrNull()
+        }
+        // 形态 2：download-v2?params=<base64>
+        val idx = trimmed.indexOf("params=")
         if (idx < 0) return null
-        val params = downloadUrl.substring(idx + "params=".length).substringBefore("&")
+        val params = trimmed.substring(idx + "params=".length).substringBefore("&")
         return runCatching {
             val normalized = params.replace('-', '+').replace('_', '/')
             String(Base64.decode(normalized, Base64.DEFAULT), Charsets.UTF_8)
         }.getOrNull()
     }
+
+    /**
+     * 跟随 123 CDN 的 redirect_url：带 `auto_redirect=0` 时，GET 直链返回
+     * JSON `{"code":0,"data":{"redirect_url":"https://...pd1.cjjd19.com/..."}}` 而非直接文件，
+     * 且 redirect_url 自身也可能带 auto_redirect=0（可能多跳）。这里循环跟随（最多 5 跳），
+     * 每跳仅当响应体很小（≤8KB，JSON 跳转页）才读取解析；大响应视为真实文件流，返回当前 URL。
+     */
+    private fun followRedirectUrl(initialUrl: String): String {
+        var url = initialUrl
+        repeat(5) {
+            val next = probeJsonRedirect(url) ?: return url
+            url = next
+        }
+        return url
+    }
+
+    /** 探测单跳：响应为小 JSON 且含 data.redirect_url 时返回新地址，否则 null（当前 URL 即最终可下载地址） */
+    private fun probeJsonRedirect(url: String): String? = runCatching {
+        val request = Request.Builder()
+            .url(url)
+            .header("Referer", Pan123Constants.DOWNLOAD_REFERER)
+            .header("User-Agent", Pan123Constants.DART_UA)
+            .get()
+            .build()
+        client.newCall(request).execute().use { response ->
+            val len = response.header("Content-Length")?.toLongOrNull() ?: -1L
+            if (len >= 0 && len <= 8192) {
+                val body = response.body?.string() ?: return@use null
+                if (body.trimStart().startsWith("{")) {
+                    runCatching {
+                        JSONObject(body).optJSONObject("data")
+                            ?.optString("redirect_url")
+                            ?.takeIf { it.isNotBlank() }
+                    }.getOrNull()
+                } else null
+            } else null
+        }
+    }.getOrNull()
 
     /** 成功判定：code == 0（登录接口除外，为 200） */
     private fun checkOk(json: JSONObject, fallback: String) {

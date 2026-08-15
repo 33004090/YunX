@@ -71,7 +71,11 @@ class ChunkDownloader(private val client: OkHttpClient) {
             try {
                 runCatching {
                     call.execute().use { response ->
-                        Log.d(TAG, "getTotalSize: range=$withRange code=${response.code} url=${url.take(120)}")
+                        Log.d(TAG, "getTotalSize: range=$withRange code=${response.code} ct=${response.header("Content-Type")} url=${url.take(120)}")
+                        // ★ 防盗链/过期/错误页（HTML）直接视为无法取大小，回退流式/单流
+                        if (response.header("Content-Type").orEmpty().contains("text/html", ignoreCase = true)) {
+                            return@use null
+                        }
                         if (!response.isSuccessful) return@use null
                         response.header("Content-Range")
                             ?.substringAfter('/')?.toLongOrNull()
@@ -244,6 +248,11 @@ class ChunkDownloader(private val client: OkHttpClient) {
         val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
         try {
             call.execute().use { response ->
+                // ★ 最终响应若是 HTML（防盗链/过期/错误页），直接失败，绝不存盘
+                if (response.header("Content-Type").orEmpty().contains("text/html", ignoreCase = true)) {
+                    Log.w(TAG, "downloadFull: task=$taskId 返回 text/html（疑似过期/防盗链/错误页），终止")
+                    throw IllegalStateException("下载失败：链接已失效或需要 Referer（返回 HTML 页）")
+                }
                 if (!response.isSuccessful) throw IllegalStateException("下载失败 HTTP ${response.code}")
                 val body = response.body ?: return@use false
                 RandomAccessFile(partFile, "rw").use { raf ->
