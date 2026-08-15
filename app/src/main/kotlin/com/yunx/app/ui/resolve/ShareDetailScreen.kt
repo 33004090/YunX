@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -63,6 +64,7 @@ import androidx.activity.compose.BackHandler
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.data.network.model.ShareSession
 import com.yunx.app.data.prefs.SettingsRepository
+import com.yunx.app.ui.components.ScrollToTopButton
 import com.yunx.app.ui.items.MultiSelectAction
 import com.yunx.app.ui.items.MultiSelectBar
 import com.yunx.app.ui.screens.BaiduSaveSheet
@@ -129,9 +131,12 @@ fun ShareDetailScreen(
     }
     // 系统返回键 → 返回上一级目录 / 根目录回输入页（而不是退出应用）
     BackHandler { onBack() }
+    // 文件列表滚动状态（返回顶部按钮用）
+    val listState = rememberLazyListState()
     // 多选模式：底部批量操作栏 + 处理中弹窗
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -245,6 +250,17 @@ fun ShareDetailScreen(
                 )
             }
         }
+
+        // 返回顶部按钮（上滑离开顶部后显示；多选模式下上移避开底部批量栏）
+        ScrollToTopButton(
+            listState = listState,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(
+                    end = 16.dp,
+                    bottom = if (viewModel.multiSelectMode) 104.dp else 16.dp
+                )
+        )
 
         // 多选模式：底部批量操作栏（转存/下载）
         if (viewModel.multiSelectMode) {

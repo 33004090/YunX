@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
@@ -70,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import com.yunx.app.data.network.model.ShareFile
 import com.yunx.app.ui.items.MultiSelectAction
 import com.yunx.app.ui.items.MultiSelectBar
+import com.yunx.app.ui.components.ScrollToTopButton
 import com.yunx.app.ui.resolve.BackToParentItem
 import com.yunx.app.ui.resolve.CrumbBar
 import com.yunx.app.ui.resolve.ShareFileRow
@@ -94,8 +96,13 @@ fun Pan123CloudScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
-    // 系统返回键 → 返回网盘账号列表（而不是退出应用）
-    BackHandler { onExit() }
+    // 系统返回键 → 子目录返回上一级，根目录返回账号列表（对齐解析页返回行为）
+    BackHandler {
+        val s = state
+        if (s is Pan123CloudUiState.Loaded && s.pathNames.isNotEmpty()) viewModel.back() else onExit()
+    }
+    // 文件列表滚动状态（返回顶部按钮用）
+    val listState = rememberLazyListState()
     var showActionSheet by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var showMove by remember { mutableStateOf(false) }
@@ -160,6 +167,7 @@ fun Pan123CloudScreen(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         LazyColumn(
+                            state = listState,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -274,6 +282,17 @@ fun Pan123CloudScreen(
                             }
                         }
                     }
+
+                    // 返回顶部按钮（上滑离开顶部后显示；多选模式下上移避开底部批量栏）
+                    ScrollToTopButton(
+                        listState = listState,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(
+                                end = 16.dp,
+                                bottom = if (viewModel.multiSelectMode) 104.dp else 16.dp
+                            )
+                    )
 
                     AnimatedVisibility(
                         visible = viewModel.multiSelectMode,
