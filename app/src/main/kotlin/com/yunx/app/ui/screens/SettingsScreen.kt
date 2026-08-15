@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VolunteerActivism
@@ -65,6 +66,7 @@ fun SettingsScreen(
     scrollBehavior: TopAppBarScrollBehavior,
     downloadThreads: Int,
     onThreadsChange: (Int) -> Unit,
+    onThemeClick: () -> Unit,
     onAboutClick: () -> Unit,
     onSupportClick: () -> Unit,
     backupManager: AuthBackupManager,
@@ -114,6 +116,16 @@ fun SettingsScreen(
             title = "下载线程数",
             description = "当前 $threads 线程（分片并发）",
             onClick = { showThreadsDialog = true }
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        SectionLabel("外观")
+        SettingsItem(
+            icon = Icons.Outlined.Palette,
+            title = "主题与外观",
+            description = "主题色、动态色彩与深色模式",
+            onClick = onThemeClick
         )
 
         Spacer(modifier = Modifier.height(24.dp))

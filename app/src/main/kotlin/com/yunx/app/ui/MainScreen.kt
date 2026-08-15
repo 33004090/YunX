@@ -92,6 +92,7 @@ import com.yunx.app.ui.screens.OnboardingScreen
 import com.yunx.app.ui.screens.ResolveScreen
 import com.yunx.app.ui.screens.SettingsScreen
 import com.yunx.app.ui.screens.SupportScreen
+import com.yunx.app.ui.screens.ThemeScreen
 import com.yunx.app.ui.screens.UpdateDialog
 import com.yunx.app.ui.viewmodel.BaiduAccountViewModel
 import com.yunx.app.ui.viewmodel.BaiduCloudViewModel
@@ -136,6 +137,7 @@ fun MainScreen() {
     var showPan123Login by rememberSaveable { mutableStateOf(false) }
     var showAbout by rememberSaveable { mutableStateOf(false) }
     var showSupport by rememberSaveable { mutableStateOf(false) }
+    var showTheme by rememberSaveable { mutableStateOf(false) }
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val context = LocalContext.current
@@ -575,6 +577,7 @@ fun MainScreen() {
                         scrollBehavior = scrollBehavior,
                         downloadThreads = settings.downloadThreads,
                         onThreadsChange = { settings.downloadThreads = it },
+                        onThemeClick = { showTheme = true },
                         onAboutClick = { showAbout = true },
                         onSupportClick = { showSupport = true },
                         backupManager = backupManager
@@ -665,6 +668,18 @@ fun MainScreen() {
     ) {
         SupportScreen(
             onBack = { showSupport = false }
+        )
+    }
+
+    // 主题与外观：叠加覆盖层（淡入 + 轻微缩放过渡）
+    AnimatedVisibility(
+        visible = showTheme,
+        enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.96f),
+        exit = fadeOut(tween(160)) + scaleOut(tween(160), targetScale = 0.96f),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        ThemeScreen(
+            onBack = { showTheme = false }
         )
     }
     }

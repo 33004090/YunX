@@ -3,8 +3,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    
-    alias(libs.plugins.ksp) 
+
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -13,7 +13,7 @@ android {
 
     defaultConfig {
         applicationId = "com.yunx.app"
-        minSdk = 21
+        minSdk = 23
         targetSdk = 34
         versionCode = 7
         versionName = "1.2.3"
@@ -40,11 +40,13 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")  
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation(libs.material)   // 原 libs.material.color.utilities -> 改为官方 Material 主库（含 color.utilities 包）
+
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)          // 提供协程扩展，如 Flow、suspend
-    ksp(libs.room.compiler)   
-    
+    ksp(libs.room.compiler)
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
