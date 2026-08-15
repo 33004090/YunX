@@ -263,19 +263,21 @@ fun MainScreen() {
     val pan123ViewModel: Pan123AccountViewModel = viewModel(
         factory = Pan123AccountViewModel.Factory(pan123Repository)
     )
-    // 夸克云盘浏览：作为网盘 Tab 内容展示（非全屏），cookie 直接从数据库读取（避免 StateFlow 初始值为空的竞态）
+    // 夸克云盘浏览：作为网盘 Tab 内容展示（非全屏），cookie 从数据库读取（避免 StateFlow 初始值为空的竞态）；
+    // 下载前经 getFreshCookie 惰性刷新 __puus（修复 AlistGo/alist#830 下载 412）
     val quarkCloudViewModel: QuarkCloudViewModel = viewModel(
         factory = QuarkCloudViewModel.Factory(
             api,
-            { repository.getAccount()?.cookie },
+            { repository.getFreshCookie() },
             downloadManager
         )
     )
-    // UC 网盘云盘浏览：点击已登录的 UC 卡片打开（cookie 从数据库读取）
+    // UC 网盘云盘浏览：点击已登录的 UC 卡片打开（cookie 从数据库读取）；
+    // 取链前经 getFreshCookie 惰性刷新 __puus（与夸克同源，修复取链/直链过期失败）
     val ucCloudViewModel: UCCoudViewModel = viewModel(
         factory = UCCoudViewModel.Factory(
             ucApi,
-            { ucRepository.getAccount()?.cookie },
+            { ucRepository.getFreshCookie() },
             downloadManager
         )
     )

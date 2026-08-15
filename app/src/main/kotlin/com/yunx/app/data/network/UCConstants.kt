@@ -87,6 +87,12 @@ object UCConstants {
     /** 临时转存目录名 */
     const val TEMP_DIR_NAME = "YunX临时转存"
 
+    /** 会话刷新探测接口：任意接口均可，用于重新下发 __puus（AList quark_uc util.go:224 用 /config，UC/夸克通用） */
+    const val CONFIG_URL = "$API_BASE/1/clouddrive/config?pr=UCBrowser&fr=pc"
+
+    /** __puus 有效期约 3 小时，提前到 90 分钟刷新（对齐 AList 100±5 分钟） */
+    const val PUUS_REFRESH_INTERVAL_MS = 90L * 60 * 1000
+
     /** 关键 Cookie 字段，缺失则视为未登录（UC 与夸克共用） */
     fun isValidCookie(cookie: String?): Boolean =
         cookie != null && cookie.contains("__pus=") && cookie.contains("__puus=")

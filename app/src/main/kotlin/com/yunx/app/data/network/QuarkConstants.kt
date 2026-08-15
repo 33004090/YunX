@@ -80,6 +80,15 @@ object QuarkConstants {
     /** 临时转存子目录前缀（唯一子目录 tr_<时间戳>_<随机>，供启动一次性清理识别） */
     const val TEMP_SUBDIR_PREFIX = "tr_"
 
+    /** 下载直链防盗链必须携带的 Referer（与 AList quark_uc meta.go:37 一致） */
+    const val DOWNLOAD_REFERER = "https://pan.quark.cn/"
+
+    /** 会话刷新探测接口：任意接口均可，用于重新下发 __puus（AList util.go:224 用 /config） */
+    const val CONFIG_URL = "$API_BASE/1/clouddrive/config?pr=ucpro&fr=pc"
+
+    /** __puus 有效期约 3 小时，提前到 90 分钟刷新（对齐 AList 100±5 分钟） */
+    const val PUUS_REFRESH_INTERVAL_MS = 90L * 60 * 1000
+
     /** 关键 Cookie 字段，缺失则视为未登录 */
     fun isValidCookie(cookie: String?): Boolean =
         cookie != null && cookie.contains("__pus=") && cookie.contains("__puus=")

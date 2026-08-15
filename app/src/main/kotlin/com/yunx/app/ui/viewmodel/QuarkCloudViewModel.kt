@@ -224,10 +224,11 @@ class QuarkCloudViewModel(
         shareResult = null
     }
 
-    /** 夸克下载直链的请求头（Cookie + 网盘 UA） */
+    /** 夸克下载直链的请求头（Cookie + 网盘 UA + 防盗链 Referer，对齐 AList quark_uc） */
     private fun downloadHeaders(cookie: String): Map<String, String> = mapOf(
         "Cookie" to cookie,
-        "User-Agent" to com.yunx.app.data.network.QuarkConstants.API_USER_AGENT
+        "User-Agent" to com.yunx.app.data.network.QuarkConstants.API_USER_AGENT,
+        "Referer" to com.yunx.app.data.network.QuarkConstants.DOWNLOAD_REFERER
     )
 
     /**
@@ -308,7 +309,7 @@ class QuarkCloudViewModel(
                 }
                 val link = api.getDownloadLink(file.fid, cookie)
                     ?: throw IllegalStateException("获取下载链接失败")
-                // 完全复用解析分享下载逻辑：CDN 节点优选（探测最快节点，失败回退原链）+ Cookie/UA 头
+                // 直链原样使用（关闭 CDN 节点改写/探测，避免消耗直链额度与节点签名 412）
                 val effectiveUrl = com.yunx.app.data.network.QuarkCdn.fastest(link.downloadUrl, cookie)
                 downloadManager.enqueue(
                     url = effectiveUrl,
@@ -316,7 +317,8 @@ class QuarkCloudViewModel(
                     size = link.size,
                     headers = mapOf(
                         "Cookie" to cookie,
-                        "User-Agent" to com.yunx.app.data.network.QuarkConstants.API_USER_AGENT
+                        "User-Agent" to com.yunx.app.data.network.QuarkConstants.API_USER_AGENT,
+                        "Referer" to com.yunx.app.data.network.QuarkConstants.DOWNLOAD_REFERER
                     )
                 )
                 cloudMessage = "已加入下载：${link.filename.ifBlank { file.fname }}"

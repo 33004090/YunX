@@ -22,12 +22,53 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
 /**
+ * 夸克 Cookie 工具：合并/剥离 __puus、__pus（对应 AList pkg/cookie + quark_uc requestWithCookie）。
+ * __puus 约 3 小时过期，是下载直链签名校验的关键字段（AlistGo/alist#830）。
+ */
+object QuarkCookieUtil {
+    private val TRACKED = setOf("__puus", "__pus")
+
+    /** 把响应 Set-Cookie 列表里的最新 __puus/__pus 合并回原 Cookie 串 */
+    fun mergeFromSetCookies(original: String, setCookies: List<String>): String {
+        var cookie = original
+        for (sc in setCookies) {
+            val kv = sc.substringBefore(';').trim()
+            val eq = kv.indexOf('=')
+            if (eq <= 0) continue
+            val name = kv.substring(0, eq)
+            if (name in TRACKED) cookie = setOrReplace(cookie, name, kv.substring(eq + 1))
+        }
+        return cookie
+    }
+
+    /** 去掉 __puus，用于触发服务端重新下发（AList refreshPuus） */
+    fun withoutPuus(cookie: String): String =
+        cookie.split(";").map { it.trim() }
+            .filter { !it.startsWith("__puus=") }
+            .joinToString("; ")
+
+    private fun setOrReplace(cookie: String, name: String, value: String): String {
+        val parts = cookie.split(";").map { it.trim() }.toMutableList()
+        val idx = parts.indexOfFirst { it.startsWith("$name=") }
+        val kv = "$name=$value"
+        if (idx >= 0) parts[idx] = kv else parts.add(kv)
+        return parts.joinToString("; ")
+    }
+}
+
+/**
  * 夸克 API 封装（OkHttp）：账号验证 + 分享解析 + 下载直链。
  * 注意：当前关闭 SSL 证书校验，仅用于调试/抓包，上线前务必恢复。
  */
 class QuarkApi(
     private val client: OkHttpClient = createUnsafeClient()
 ) {
+
+    /**
+     * Cookie 回写接收器（推荐由 QuarkAccountRepository 注入并落库）：
+     * 每次响应把 Set-Cookie 合并后的最新 Cookie 回调，保持 __puus/__pus 始终新鲜。
+     */
+    var cookieSink: ((String) -> Unit)? = null
 
     companion object {
         /** 信任所有证书的 Client（调试用，禁止用于生产） */
@@ -336,12 +377,35 @@ class QuarkApi(
 
     // ---------- 下载直链 ----------
 
+    /**
+     * 刷新会话 Cookie（对应 AList quark_uc refreshPuus，修复 AlistGo/alist#830）：
+     * 剥离 __puus 后请求任意接口（/config），服务端会在 Set-Cookie 中重新下发 __puus/__pus。
+     * @return 合并了最新 __puus/__pus 的 Cookie；失败返回 null（调用方应回退原 Cookie）。
+     */
+    suspend fun refreshSession(cookie: String): String? = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(QuarkConstants.CONFIG_URL)
+            .header("Cookie", QuarkCookieUtil.withoutPuus(cookie))
+            .header("User-Agent", QuarkConstants.API_USER_AGENT)
+            .header("Referer", QuarkConstants.DOWNLOAD_REFERER)
+            .get()
+            .build()
+        runCatching {
+            client.newCall(request).execute().use { resp ->
+                val merged = QuarkCookieUtil.mergeFromSetCookies(cookie, resp.headers("Set-Cookie"))
+                if (merged != cookie) cookieSink?.invoke(merged)
+                merged
+            }
+        }.getOrNull()
+    }
+
     /** 6.1 获取下载直链 */
     suspend fun getDownloadLink(fid: String, cookie: String): DownloadLink? = withContext(Dispatchers.IO) {
         val body = JSONObject().put("fids", JSONArray().put(fid)).toString()
         val request = postJson(QuarkConstants.DOWNLOAD_URL, cookie, body)
         val response = client.newCall(request).execute()
         val bodyStr = response.use {
+            mergeCookieFromResponse(request, it)
             it.body?.string() ?: throw QuarkApiException("获取下载链接失败：响应为空")
         }
         val json = runCatching { JSONObject(bodyStr) }.getOrElse {
@@ -499,6 +563,7 @@ class QuarkApi(
     private fun <T> parseData(request: Request, parser: (JSONObject) -> T): T {
         val response = client.newCall(request).execute()
         val body = response.use {
+            mergeCookieFromResponse(request, it)
             it.body?.string() ?: throw QuarkApiException("请求失败：响应为空")
         }
         val json = runCatching { JSONObject(body) }.getOrElse {
@@ -509,5 +574,15 @@ class QuarkApi(
             throw QuarkApiException(json.optString("message").ifBlank { "请求失败" })
         }
         return parser(json.optJSONObject("data") ?: throw QuarkApiException("响应缺少 data"))
+    }
+
+    /** 从响应 Set-Cookie 合并 __puus/__pus 回原 Cookie 并回调 cookieSink（保持会话新鲜，对齐 AList requestWithCookie） */
+    private fun mergeCookieFromResponse(request: Request, response: okhttp3.Response) {
+        val setCookies = response.headers("Set-Cookie")
+        if (setCookies.isEmpty()) return
+        val original = request.header("Cookie").orEmpty()
+        if (original.isBlank()) return
+        val merged = QuarkCookieUtil.mergeFromSetCookies(original, setCookies)
+        if (merged != original) cookieSink?.invoke(merged)
     }
 }

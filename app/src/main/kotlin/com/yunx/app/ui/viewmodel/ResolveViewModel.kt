@@ -349,11 +349,17 @@ class ResolveViewModel(
                     downloadError = "请先登录网盘"
                     return@launch
                 }
+                // 夸克/UC 共用 __puus：取链与下载必须用同一份已刷新 Cookie（直链签名绑定取链时刻的 __puus）
+                val quarkCred = when (currentPlatform) {
+                    SharePlatform.QUARK -> accountRepository.getFreshCookie() ?: credential
+                    SharePlatform.UC -> ucAccountRepository.getFreshCookie() ?: credential
+                    else -> credential
+                }
                 // 展开选中项：文件直接加入，文件夹递归收集（相对路径 = 文件夹名/子/...）
                 val tasks = mutableListOf<Pair<ShareFile, String>>()
                 for (file in files) {
                     if (file.isdir) {
-                        collectShareFolder(s, file.fid, file.fname, credential, tasks, 0)
+                        collectShareFolder(s, file.fid, file.fname, quarkCred, tasks, 0)
                     } else {
                         tasks.add(file to "")
                     }
@@ -367,9 +373,9 @@ class ResolveViewModel(
                 tasks.forEachIndexed { index, (file, relPath) ->
                     batchProgress = "${index + 1}/${tasks.size}"
                     runCatching {
-                        currentRepo().getShareDownloadLink(s, file, credential).getOrNull()?.let { link ->
+                        currentRepo().getShareDownloadLink(s, file, quarkCred).getOrNull()?.let { link ->
                             // 文件夹内文件用相对路径（保持目录结构）；根目录文件用取链返回的文件名
-                            enqueueDownload(link, credential, if (relPath.isBlank()) link.filename else relPath)
+                            enqueueDownload(link, quarkCred, if (relPath.isBlank()) link.filename else relPath)
                             okCount++
                         }
                     }
@@ -578,7 +584,13 @@ class ResolveViewModel(
                     downloadError = "登录已失效，请重新登录"
                     return@launch
                 }
-                currentRepo().getShareDownloadLink(s, file, credential)
+                // 夸克/UC 共用 __puus：取链前确保新鲜（直链签名绑定取链时刻的 Cookie）
+                val quarkCred = when (currentPlatform) {
+                    SharePlatform.QUARK -> accountRepository.getFreshCookie() ?: credential
+                    SharePlatform.UC -> ucAccountRepository.getFreshCookie() ?: credential
+                    else -> credential
+                }
+                currentRepo().getShareDownloadLink(s, file, quarkCred)
                     .onSuccess { downloadLink = it }
                     .onFailure { downloadError = it.message ?: "获取下载链接失败" }
             } finally {
@@ -616,6 +628,13 @@ class ResolveViewModel(
         val isC139 = currentPlatform == SharePlatform.C139
         val isPan123 = currentPlatform == SharePlatform.PAN123
         val isQuark = currentPlatform == SharePlatform.QUARK
+        // 【关键修复】夸克/UC 共用 __puus：取链与下载必须用同一份已刷新 Cookie（AlistGo/alist#830 类缺陷）
+        // getFreshCookie 有 90 分钟间隔保护，与取链处调用幂等，得到的是同一份。
+        val effectiveCredential = when (currentPlatform) {
+            SharePlatform.QUARK -> accountRepository.getFreshCookie() ?: credential
+            SharePlatform.UC -> ucAccountRepository.getFreshCookie() ?: credential
+            else -> credential
+        }
         // 迅雷直链 URL 自带签名，无需 Cookie；夸克/UC/百度需 Cookie + UA；139 直链为 CDN 签名地址；123 直链需 Referer
         val headers = when {
             isXunlei -> mapOf("User-Agent" to XunleiConstants.APP_UA) // 迅雷直链必须用官方 app UA，浏览器 UA 会触发 CDN 降级（200整文件）
@@ -637,16 +656,16 @@ class ResolveViewModel(
                 "Referer" to UCConstants.DOWNLOAD_REFERER,
                 "Origin" to UCConstants.WEB_ORIGIN
             )
+            // 夸克：防盗链需固定 Referer（对齐 AList quark_uc）
             else -> mapOf(
-                "Cookie" to credential,
-                "User-Agent" to QuarkConstants.API_USER_AGENT
+                "Cookie" to effectiveCredential,
+                "User-Agent" to QuarkConstants.API_USER_AGENT,
+                "Referer" to QuarkConstants.DOWNLOAD_REFERER
             )
         }
-        // 夸克直链：并发探测最近 CDN 节点（dl-pc-sz → 就近），失败自动回退原链接
+        // 夸克直链：原样使用（关闭节点改写/探测，避免消耗直链额度与节点签名 412）
         val effectiveUrl = if (isQuark) {
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
-                QuarkCdn.fastest(link.downloadUrl, credential)
-            }
+            QuarkCdn.fastest(link.downloadUrl, effectiveCredential)
         } else {
             link.downloadUrl
         }
@@ -657,7 +676,7 @@ class ResolveViewModel(
             // 下载成功完成后：清理夸克临时转存子目录（根治 21001；其它平台 cleanupDirFid 为 null 自动跳过）
             onComplete = {
                 link.cleanupDirFid?.let { dirFid ->
-                    currentRepo().cleanupTempDir(dirFid, credential)
+                    currentRepo().cleanupTempDir(dirFid, effectiveCredential)
                 }
             }
         )
