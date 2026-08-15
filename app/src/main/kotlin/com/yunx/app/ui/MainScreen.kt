@@ -485,8 +485,10 @@ fun MainScreen() {
     }
 
     // 折叠标题状态提升到本层：跨页面共享，页面切换时折叠/展开状态保持不变
+    // 用 exitUntilCollapsed（默认实现，含松手吸附）：滚动时标题先收起再滚内容；
+    // 向上滚动回顶部过程中标题保持收起，只有列表到达最顶部后继续下拉（overscroll）才重新展开
     val topAppBarState = rememberTopAppBarState()
-    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(topAppBarState)
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(topAppBarState)
 
     // 全局 Snackbar 宿主（Material3，替换原 Toast 提示）
     val snackbarHostState = rememberGlobalSnackbarHostState()
