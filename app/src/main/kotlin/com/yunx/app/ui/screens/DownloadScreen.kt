@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.yunx.app.data.db.DownloadTaskEntity
 import com.yunx.app.data.download.DownloadStats
 import com.yunx.app.ui.SnackbarController
@@ -621,7 +622,8 @@ private fun openSavedFile(context: android.content.Context, savePath: String) {
     val uri = if (savePath.startsWith("content://")) {
         Uri.parse(savePath)
     } else {
-        Uri.fromFile(File(savePath))
+        // Android 7.0+ 禁止暴露 file:// URI，必须经 FileProvider 转 content://
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(savePath))
     }
     val intent = Intent(Intent.ACTION_VIEW).apply {
         setDataAndType(uri, "*/*")
@@ -657,7 +659,8 @@ private fun installApk(context: android.content.Context, savePath: String, fileN
     val uri = if (savePath.startsWith("content://")) {
         Uri.parse(savePath)
     } else {
-        Uri.fromFile(File(savePath))
+        // Android 7.0+ 禁止暴露 file:// URI，必须经 FileProvider 转 content://
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(savePath))
     }
     val intent = Intent(Intent.ACTION_VIEW).apply {
         setDataAndType(uri, "application/vnd.android.package-archive")
