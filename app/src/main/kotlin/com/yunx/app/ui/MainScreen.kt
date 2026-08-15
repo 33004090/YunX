@@ -11,7 +11,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -19,6 +22,8 @@ import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Text
@@ -34,10 +39,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.content.res.Configuration
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -112,7 +120,7 @@ import java.util.concurrent.TimeUnit
 /**
  * 主页框架：
  * - 顶部可折叠大标题（LargeTopAppBar），切换 Tab 时标题文字随 Tab 变化，折叠状态不受影响；
- * - 底部 4 个导航 Tab（解析 / 网盘 / 下载 / 设置）；
+ * - 导航 Tab（解析 / 网盘 / 下载 / 设置）：竖屏为底部导航栏（NavigationBar），横屏切换为侧边导航栏（NavigationRail）；
  * - 通过 SaveableStateHolder 保存各页面状态，切换 Tab 再切回来不会重置；
  * - 夸克登录页全屏覆盖展示。
  */
@@ -132,6 +140,8 @@ fun MainScreen() {
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // 横屏时使用侧边导航栏（NavigationRail），竖屏保持底部导航栏（NavigationBar）
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     // 首次启动引导页（context 声明后检测）
     var showOnboarding by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -483,116 +493,143 @@ fun MainScreen() {
 
     // 主框架与全屏覆盖层（关于页）放在同一 Box：覆盖层带过渡动画
     Box(modifier = Modifier.fillMaxSize()) {
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            LargeTopAppBar(
-                title = {
-                    Text(
-                        text = currentTab.title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface
+    // 顶部可折叠大标题（竖屏 / 横屏共用）
+    val topBarContent: @Composable () -> Unit = {
+        LargeTopAppBar(
+            title = {
+                Text(
+                    text = currentTab.title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold
                 )
+            },
+            scrollBehavior = scrollBehavior,
+            colors = TopAppBarDefaults.largeTopAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                scrolledContainerColor = MaterialTheme.colorScheme.surface
             )
-        },
-        bottomBar = {
-            NavigationBar {
-                MainTab.values().forEach { tab ->
-                    NavigationBarItem(
-                        selected = currentTab == tab,
-                        onClick = { currentTab = tab },
-                        icon = {
-                            Icon(
-                                imageVector = if (currentTab == tab) tab.selectedIcon else tab.unselectedIcon,
-                                contentDescription = tab.title
-                            )
-                        },
-                        label = { Text(tab.title) }
+        )
+    }
+    // Tab 内容区（竖屏 / 横屏共用）：每个页面独立保存状态，切换 Tab 再切回来不丢失；带 Material3 过渡动画（按 Tab 顺序决定方向）
+    val tabContent: @Composable () -> Unit = {
+        AnimatedContent(
+            targetState = currentTab,
+            transitionSpec = {
+                // 根据 Tab 顺序决定滑动方向：向右切（新Tab在右边）→ 新页从右滑入；向左切反向
+                val forward = targetState.ordinal > initialState.ordinal
+                if (forward) {
+                    (fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 4 })
+                        .togetherWith(fadeOut(tween(160)) + slideOutHorizontally(tween(160)) { -it / 4 })
+                } else {
+                    (fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 4 })
+                        .togetherWith(fadeOut(tween(160)) + slideOutHorizontally(tween(160)) { it / 4 })
+                }
+            },
+            label = "mainTab"
+        ) { tab ->
+            saveableStateHolder.SaveableStateProvider(tab) {
+                when (tab) {
+                    MainTab.Resolve -> ResolveScreen(
+                        scrollBehavior,
+                        resolveViewModel,
+                        quarkCloudViewModel,
+                        xunleiCloudViewModel,
+                        baiduCloudViewModel,
+                        c139CloudViewModel,
+                        ucCloudViewModel,
+                        pan123CloudViewModel
+                    )
+                    MainTab.Drive -> DriveScreen(
+                        scrollBehavior = scrollBehavior,
+                        quarkAccount = quarkAccount,
+                        ucAccount = ucAccount,
+                        xunleiAccount = xunleiAccount,
+                        baiduAccount = baiduAccount,
+                        c139Account = c139Account,
+                        pan123Account = pan123Account,
+                        quarkCloudViewModel = quarkCloudViewModel,
+                        ucCloudViewModel = ucCloudViewModel,
+                        xunleiCloudViewModel = xunleiCloudViewModel,
+                        baiduCloudViewModel = baiduCloudViewModel,
+                        c139CloudViewModel = c139CloudViewModel,
+                        pan123CloudViewModel = pan123CloudViewModel,
+                        driveQuotaViewModel = driveQuotaViewModel,
+                        onQuarkLogin = { showQuarkLogin = true },
+                        onQuarkLogout = { viewModel.logout() },
+                        onDownloadStarted = { currentTab = MainTab.Download },
+                        onUCLogin = { showUCLogin = true },
+                        onUCLogout = { ucViewModel.logout() },
+                        onXunleiLogin = { showXunleiLogin = true },
+                        onXunleiLogout = { xunleiViewModel.logout() },
+                        onBaiduLogin = { showBaiduLogin = true },
+                        onBaiduLogout = { baiduViewModel.logout() },
+                        onC139Login = { showC139Login = true },
+                        onC139Logout = { c139ViewModel.logout() },
+                        onPan123Login = { showPan123Login = true },
+                        onPan123Logout = { pan123ViewModel.logout() }
+                    )
+                    MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
+                    MainTab.Settings -> SettingsScreen(
+                        scrollBehavior = scrollBehavior,
+                        downloadThreads = settings.downloadThreads,
+                        onThreadsChange = { settings.downloadThreads = it },
+                        onAboutClick = { showAbout = true },
+                        onSupportClick = { showSupport = true },
+                        backupManager = backupManager
                     )
                 }
             }
         }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            // 每个页面独立保存状态，切换 Tab 再切回来不丢失；带 Material3 过渡动画（按 Tab 顺序决定方向）
-            AnimatedContent(
-                targetState = currentTab,
-                transitionSpec = {
-                    // 根据 Tab 顺序决定滑动方向：向右切（新Tab在右边）→ 新页从右滑入；向左切反向
-                    val forward = targetState.ordinal > initialState.ordinal
-                    if (forward) {
-                        (fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 4 })
-                            .togetherWith(fadeOut(tween(160)) + slideOutHorizontally(tween(160)) { -it / 4 })
-                    } else {
-                        (fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 4 })
-                            .togetherWith(fadeOut(tween(160)) + slideOutHorizontally(tween(160)) { it / 4 })
-                    }
-                },
-                label = "mainTab"
-            ) { tab ->
-                saveableStateHolder.SaveableStateProvider(tab) {
-                    when (tab) {
-                        MainTab.Resolve -> ResolveScreen(
-                            scrollBehavior,
-                            resolveViewModel,
-                            quarkCloudViewModel,
-                            xunleiCloudViewModel,
-                            baiduCloudViewModel,
-                            c139CloudViewModel,
-                            ucCloudViewModel,
-                            pan123CloudViewModel
-                        )
-                        MainTab.Drive -> DriveScreen(
-                            scrollBehavior = scrollBehavior,
-                            quarkAccount = quarkAccount,
-                            ucAccount = ucAccount,
-                            xunleiAccount = xunleiAccount,
-                            baiduAccount = baiduAccount,
-                            c139Account = c139Account,
-                            pan123Account = pan123Account,
-                            quarkCloudViewModel = quarkCloudViewModel,
-                            ucCloudViewModel = ucCloudViewModel,
-                            xunleiCloudViewModel = xunleiCloudViewModel,
-                            baiduCloudViewModel = baiduCloudViewModel,
-                            c139CloudViewModel = c139CloudViewModel,
-                            pan123CloudViewModel = pan123CloudViewModel,
-                            driveQuotaViewModel = driveQuotaViewModel,
-                            onQuarkLogin = { showQuarkLogin = true },
-                            onQuarkLogout = { viewModel.logout() },
-                            onDownloadStarted = { currentTab = MainTab.Download },
-                            onUCLogin = { showUCLogin = true },
-                            onUCLogout = { ucViewModel.logout() },
-                            onXunleiLogin = { showXunleiLogin = true },
-                            onXunleiLogout = { xunleiViewModel.logout() },
-                            onBaiduLogin = { showBaiduLogin = true },
-                            onBaiduLogout = { baiduViewModel.logout() },
-                            onC139Login = { showC139Login = true },
-                            onC139Logout = { c139ViewModel.logout() },
-                            onPan123Login = { showPan123Login = true },
-                            onPan123Logout = { pan123ViewModel.logout() }
-                        )
-                        MainTab.Download -> DownloadScreen(scrollBehavior, downloadViewModel)
-                        MainTab.Settings -> SettingsScreen(
-                            scrollBehavior = scrollBehavior,
-                            downloadThreads = settings.downloadThreads,
-                            onThreadsChange = { settings.downloadThreads = it },
-                            onAboutClick = { showAbout = true },
-                            onSupportClick = { showSupport = true },
-                            backupManager = backupManager
-                        )
+    }
+
+    if (isLandscape) {
+        // 横屏：左侧侧边导航栏（NavigationRail）+ 右侧顶栏 & 内容
+        Box(modifier = Modifier.fillMaxSize()) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                MainNavigationRail(
+                    currentTab = currentTab,
+                    onTabSelected = { currentTab = it }
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize()
+                ) {
+                    topBarContent()
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        tabContent()
                     }
                 }
+            }
+            // 全局 Snackbar（横屏无底部栏，悬浮底部居中）
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
+    } else {
+        // 竖屏：Scaffold + 底部导航栏
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            topBar = { topBarContent() },
+            bottomBar = {
+                MainBottomBar(
+                    currentTab = currentTab,
+                    onTabSelected = { currentTab = it }
+                )
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                tabContent()
             }
         }
     }
@@ -658,6 +695,57 @@ fun MainScreen() {
                         .apply()
                     showUpdateDialog = false
                 }
+            )
+        }
+    }
+}
+
+/**
+ * 底部导航栏（竖屏）：4 个主 Tab（解析 / 网盘 / 下载 / 设置）。
+ */
+@Composable
+private fun MainBottomBar(
+    currentTab: MainTab,
+    onTabSelected: (MainTab) -> Unit
+) {
+    NavigationBar {
+        MainTab.values().forEach { tab ->
+            NavigationBarItem(
+                selected = currentTab == tab,
+                onClick = { onTabSelected(tab) },
+                icon = {
+                    Icon(
+                        imageVector = if (currentTab == tab) tab.selectedIcon else tab.unselectedIcon,
+                        contentDescription = tab.title
+                    )
+                },
+                label = { Text(tab.title) }
+            )
+        }
+    }
+}
+
+/**
+ * 侧边导航栏（横屏）：同 4 个主 Tab，未选中项只显示图标，节省横向空间。
+ */
+@Composable
+private fun MainNavigationRail(
+    currentTab: MainTab,
+    onTabSelected: (MainTab) -> Unit
+) {
+    NavigationRail {
+        MainTab.values().forEach { tab ->
+            NavigationRailItem(
+                selected = currentTab == tab,
+                onClick = { onTabSelected(tab) },
+                icon = {
+                    Icon(
+                        imageVector = if (currentTab == tab) tab.selectedIcon else tab.unselectedIcon,
+                        contentDescription = tab.title
+                    )
+                },
+                label = { Text(tab.title) },
+                alwaysShowLabel = currentTab == tab
             )
         }
     }
