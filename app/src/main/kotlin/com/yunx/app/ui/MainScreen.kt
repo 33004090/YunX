@@ -236,7 +236,9 @@ fun MainScreen() {
             context = context,
             dao = db.downloadTaskDao(),
             downloader = ChunkDownloader(downloadClient),
-            threadProvider = settings::downloadThreads
+            threadProvider = settings::downloadThreads,
+            // 自定义下载保存目录（SAF tree Uri），设置页可选，动态生效
+            saveDirProvider = { settings.downloadDirUri }
         )
     }
     // Android 9- 写公共 Download 需要 WRITE_EXTERNAL_STORAGE 运行时授权：

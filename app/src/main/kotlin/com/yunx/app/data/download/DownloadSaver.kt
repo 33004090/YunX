@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Log
 import java.io.File
@@ -21,12 +22,13 @@ object DownloadSaver {
     private const val TAG = "YunX-DL"
 
     /**
-     * 保存文件到公共 Download 目录。
+     * 保存文件到下载目录。
      * @param fileName 可为**相对路径**（如 "文件夹A/子/文件.mp4"，用于下载整个文件夹保持目录结构）；
-     *                 纯文件名时保存到 Download 根目录。
-     * @return 保存成功后的标识（MediaStore uri 字符串或文件绝对路径）；失败返回 null
+     *                 纯文件名时保存到根目录。
+     * @param targetDirUri 自定义保存目录（SAF tree Uri，content://...）；null 时用系统默认 Download
+     * @return 保存成功后的标识（MediaStore uri 字符串 / SAF 文档 uri / 文件绝对路径）；失败返回 null
      */
-    fun save(context: Context, fileName: String, source: File): String? {
+    fun save(context: Context, fileName: String, source: File, targetDirUri: String? = null): String? {
         // 拆分相对路径与文件名：目录段与文件名分别清洗
         val clean = fileName.replace('\\', '/')
         val slash = clean.lastIndexOf('/')
@@ -35,7 +37,11 @@ object DownloadSaver {
         val safeName = sanitizeFileName(baseName)
         val safeDir = dirRel.split('/').filter { it.isNotBlank() }
             .joinToString("/") { sanitizeFileName(it) }
-        // Android 10+ 优先 MediaStore；失败则回退传统文件路径（Android 9- 可用）
+        // 自定义 SAF 目录：优先走系统文档树（适配 Android 10/11+ 分区存储与 Android 9-，无需额外存储权限）
+        if (!targetDirUri.isNullOrBlank()) {
+            return saveViaSaf(context, safeName, safeDir, source, targetDirUri)
+        }
+        // 默认目录：Android 10+ 优先 MediaStore；失败则回退传统文件路径（Android 9- 可用）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             saveViaMediaStore(context, safeName, safeDir, source)?.let { return it }
             Log.e(TAG, "MediaStore 保存失败，回退传统路径：$safeDir/$safeName")
@@ -43,6 +49,98 @@ object DownloadSaver {
         saveLegacy(context, safeName, safeDir, source)?.let { return it }
         Log.e(TAG, "传统路径保存失败（Android 9- 需存储权限；Android 10+ 分区存储不可写），放弃保存")
         return null
+    }
+
+    /**
+     * 通过 SAF 文档树保存（自定义下载目录）：
+     * - tree uri 由用户经系统「选择文件夹」弹窗授权（takePersistableUriPermission 持久化）；
+     * - 相对路径子目录逐级查找/创建（MIME_TYPE_DIR）；
+     * - 文件名冲突自动加时间戳防重。
+     */
+    private fun saveViaSaf(
+        context: Context,
+        fileName: String,
+        subDir: String,
+        source: File,
+        treeUriString: String
+    ): String? {
+        val resolver = context.contentResolver
+        val treeUri = android.net.Uri.parse(treeUriString)
+        return runCatching {
+            // 定位（或创建）目标目录：相对路径逐级解析
+            var dirUri = treeUri
+            if (subDir.isNotBlank()) {
+                for (part in subDir.split('/').filter { it.isNotBlank() }) {
+                    dirUri = getOrCreateSafDir(resolver, dirUri, part) ?: return@runCatching null
+                }
+            }
+            // 候选：原名 → 时间戳防重名
+            val candidates = buildList {
+                add(fileName)
+                repeat(3) { i -> add(timestampedName(fileName, i)) }
+            }
+            for (candidate in candidates) {
+                try {
+                    val docUri = DocumentsContract.createDocument(
+                        resolver, dirUri, mimeOf(candidate), candidate
+                    ) ?: continue
+                    val wrote = resolver.openOutputStream(docUri)?.use { out ->
+                        source.inputStream().use { it.copyTo(out) }
+                        true
+                    } ?: run {
+                        resolver.delete(docUri, null, null)
+                        false
+                    }
+                    if (wrote) return docUri.toString()
+                } catch (e: Exception) {
+                    Log.e(TAG, "SAF 保存异常（$candidate）: ${e.message}")
+                }
+            }
+            null
+        }.getOrNull()
+    }
+
+    /** 在父文档树下查找/创建指定名称的子目录，返回其文档 uri */
+    private fun getOrCreateSafDir(
+        resolver: ContentResolver,
+        parentUri: android.net.Uri,
+        name: String
+    ): android.net.Uri? {
+        // 先查已存在的子目录
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parentUri, DocumentsContract.getTreeDocumentId(parentUri)
+        )
+        resolver.query(
+            childrenUri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            ),
+            null, null, null
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getString(0)
+                val display = cursor.getString(1)
+                val mime = cursor.getString(2)
+                if (display == name && mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    return DocumentsContract.buildDocumentUriUsingTree(parentUri, id)
+                }
+            }
+        }
+        // 不存在则创建
+        return DocumentsContract.createDocument(
+            resolver, parentUri, DocumentsContract.Document.MIME_TYPE_DIR, name
+        )
+    }
+
+    /** 从 SAF tree uri 提取可读目录名（如 primary:Download/MyFolder → "Download/MyFolder"） */
+    fun safDirDisplay(uriString: String): String {
+        return runCatching {
+            val treeId = DocumentsContract.getTreeDocumentId(android.net.Uri.parse(uriString))
+            treeId.substringAfterLast(':').replace("%2F", "/").replace("%2f", "/")
+                .ifBlank { "自定义目录" }
+        }.getOrDefault("自定义目录")
     }
 
     /** 清洗文件名：非法字符替换为下划线，超长截断（保留扩展名），空名兜底 */

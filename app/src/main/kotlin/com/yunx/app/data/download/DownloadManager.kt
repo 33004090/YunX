@@ -64,7 +64,9 @@ class DownloadManager(
     private val dao: DownloadTaskDao,
     private val downloader: ChunkDownloader,
     /** 下载线程数提供者（可在设置中修改，动态生效），默认 16 */
-    private val threadProvider: () -> Int = { 16 }
+    private val threadProvider: () -> Int = { 16 },
+    /** 自定义下载保存目录提供者（SAF tree Uri，可空）；null 时保存到系统默认 Download */
+    private val saveDirProvider: () -> String? = { null }
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -534,7 +536,7 @@ class DownloadManager(
             hlsFile.delete()
             throw IllegalStateException("未授予存储权限，无法保存到下载目录")
         }
-        val savedPath = DownloadSaver.save(context, task.fileName, hlsFile)
+        val savedPath = DownloadSaver.save(context, task.fileName, hlsFile, saveDirProvider())
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
         Log.d(TAG, "hlsDownload: id=$id 下载完成 savedPath=$savedPath size=${hlsFile.length()}")
@@ -579,8 +581,8 @@ class DownloadManager(
             merged.delete()
             throw IllegalStateException("未授予存储权限，无法保存到下载目录")
         }
-        // 5) 保存
-        val savedPath = DownloadSaver.save(context, fileName, merged)
+        // 5) 保存（自定义目录经 SAF 写入；默认目录走 MediaStore/传统路径）
+        val savedPath = DownloadSaver.save(context, fileName, merged, saveDirProvider())
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
         Log.d(TAG, "finishDownload: id=$id 下载完成 savedPath=$savedPath size=${merged.length()}")

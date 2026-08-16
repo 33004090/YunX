@@ -17,6 +17,13 @@ class SettingsRepository(context: Context) {
             prefs.edit().putInt("download_threads", value.coerceIn(1, 512)).apply()
         }
 
+    /** 自定义下载保存目录（SAF tree Uri，content://...）；null/空 = 系统默认 Download 目录 */
+    var downloadDirUri: String?
+        get() = prefs.getString("download_dir_uri", null)
+        set(value) {
+            prefs.edit().putString("download_dir_uri", value).apply()
+        }
+
     /** 百度网盘大文件限速提示：是否已选择「不再显示」 */
     var baiduLimitHintDismissed: Boolean
         get() = prefs.getBoolean("baidu_limit_hint_dismissed", false)

@@ -1,5 +1,4 @@
 package com.yunx.app.ui.screens
-
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -19,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Restore
@@ -50,6 +50,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.backup.AuthBackupManager
+import com.yunx.app.data.download.DownloadSaver
+import com.yunx.app.data.prefs.SettingsRepository
 import com.yunx.app.data.update.UpdateChecker
 import com.yunx.app.ui.SnackbarController
 import com.yunx.app.util.LogExporter
@@ -84,6 +86,21 @@ fun SettingsScreen(
     LaunchedEffect(downloadThreads) { threads = downloadThreads }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // 下载保存目录（SAF）：本地状态驱动 UI 刷新，同时同步 SharedPreferences
+    val settingsRepo = remember { SettingsRepository(context) }
+    var downloadDirUri by remember { mutableStateOf(settingsRepo.downloadDirUri) }
+    val dirLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            // 持久授权：应用重启后仍可写（API19+；Android 10/11+ 分区存储必需）
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, flags) }
+            settingsRepo.downloadDirUri = uri.toString()
+            downloadDirUri = uri.toString()
+            SnackbarController.show("下载保存目录已更新")
+        }
+    }
     // 导入网盘认证文件选择器
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -121,6 +138,38 @@ fun SettingsScreen(
             title = "下载线程数",
             description = "当前 $threads 线程（分片并发）",
             onClick = { showThreadsDialog = true }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 下载保存目录：系统文件夹选择器（SAF，适配各 Android 版本分区存储）；
+        // 已自定义时卡片右侧内嵌「恢复默认」操作（不单独外露按钮）
+        SettingsItem(
+            icon = Icons.Outlined.FolderOpen,
+            title = "下载保存目录",
+            description = downloadDirUri?.let { "已自定义：${DownloadSaver.safDirDisplay(it)}" }
+                ?: "系统默认 Download（点击自定义）",
+            onClick = { dirLauncher.launch(null) },
+            trailing = if (downloadDirUri != null) {
+                {
+                    TextButton(
+                        onClick = {
+                            downloadDirUri = null
+                            settingsRepo.downloadDirUri = null
+                            SnackbarController.show("已恢复默认下载目录")
+                        },
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
+                        Text(
+                            text = "恢复默认",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            } else {
+                null
+            }
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -375,7 +424,9 @@ private fun SettingsItem(
     icon: ImageVector,
     title: String,
     description: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    /** 自定义尾部内容（如「恢复默认」操作）；null 时显示默认 ChevronRight */
+    trailing: @Composable (() -> Unit)? = null
 ) {
     Card(
         onClick = onClick,
@@ -410,11 +461,15 @@ private fun SettingsItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Icon(
-                imageVector = Icons.Outlined.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.outline
-            )
+            if (trailing != null) {
+                trailing()
+            } else {
+                Icon(
+                    imageVector = Icons.Outlined.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.outline
+                )
+            }
         }
     }
 }
