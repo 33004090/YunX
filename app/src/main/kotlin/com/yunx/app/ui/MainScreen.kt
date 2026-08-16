@@ -84,6 +84,7 @@ import com.yunx.app.ui.login.Pan123LoginScreen
 import com.yunx.app.ui.login.QuarkLoginScreen
 import com.yunx.app.ui.login.UCLoginScreen
 import com.yunx.app.ui.login.XunleiLoginScreen
+import com.yunx.app.ui.login.XunleiVerifyWebViewScreen
 import com.yunx.app.ui.navigation.MainTab
 import com.yunx.app.ui.screens.AboutScreen
 import com.yunx.app.ui.screens.DownloadScreen
@@ -132,6 +133,9 @@ fun MainScreen() {
     var showQuarkLogin by rememberSaveable { mutableStateOf(false) }
     var showUCLogin by rememberSaveable { mutableStateOf(false) }
     var showXunleiLogin by rememberSaveable { mutableStateOf(false) }
+    var showXunleiVerify by rememberSaveable { mutableStateOf(false) }
+    var xunleiVerifyUrl by rememberSaveable { mutableStateOf("") }
+    var xunleiVerifyDeviceId by rememberSaveable { mutableStateOf("") }
     var showBaiduLogin by rememberSaveable { mutableStateOf(false) }
     var showC139Login by rememberSaveable { mutableStateOf(false) }
     var showPan123Login by rememberSaveable { mutableStateOf(false) }
@@ -451,7 +455,36 @@ fun MainScreen() {
         XunleiLoginScreen(
             viewModel = xunleiViewModel,
             onBack = { showXunleiLogin = false },
-            onSaved = { showXunleiLogin = false }
+            onSaved = { showXunleiLogin = false },
+            onVerify = { url, deviceId ->
+                // 应用内验证：登录页让位，切到验证 WebView 全屏承载（不再跳外部浏览器）
+                xunleiVerifyUrl = url
+                xunleiVerifyDeviceId = deviceId
+                showXunleiLogin = false
+                showXunleiVerify = true
+            }
+        )
+        return
+    }
+
+    // 迅雷验证页（应用内 WebView 承载验证面板）：全屏覆盖（兜底承载，核心验证仍走自有短信流）
+    if (showXunleiVerify) {
+        XunleiVerifyWebViewScreen(
+            verifyUrl = xunleiVerifyUrl,
+            deviceId = xunleiVerifyDeviceId,
+            onResult = { success, _ ->
+                showXunleiVerify = false
+                showXunleiLogin = true // 回到登录页短信步骤，用户可继续「验证并登录」
+                if (success) {
+                    SnackbarController.show("验证完成，请返回登录页继续")
+                } else {
+                    SnackbarController.show("验证未完成，请重试")
+                }
+            },
+            onBack = {
+                showXunleiVerify = false
+                showXunleiLogin = true // 返回登录页短信步骤
+            }
         )
         return
     }

@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.yunx.app.data.db.XunleiAccountEntity
+import com.yunx.app.data.network.XunleiApi
 import com.yunx.app.data.network.XunleiLoginStep
 import com.yunx.app.data.repository.XunleiAccountRepository
 import kotlinx.coroutines.flow.SharingStarted
@@ -47,16 +48,24 @@ class XunleiAccountViewModel(
             loginStep = null
             val step = repository.loginWithPassword(username.trim(), password)
             if (step.needSms) {
-                // 触发安全验证：自动发送短信验证码，UI 切到短信步骤
-                val smsStep = repository.sendSms(username.trim())
-                if (smsStep.smsCreditKey.isNotBlank()) {
-                    loginStep = smsStep
-                } else {
-                    // 短信发送失败：保留 reviewUrl，UI 提供「浏览器验证」兜底（alist 方式）
+                // 触发安全验证：优先用 reviewurl 里的 creditkey（风控响应自带），否则走自有 sendSms
+                val reviewMap = XunleiApi.parseReviewUrl(step.reviewUrl)
+                val creditKey = reviewMap["creditkey"].orEmpty()
+                if (creditKey.isNotBlank()) {
+                    // 直接用响应里的 creditkey/token 进入短信输入步骤（token 可能为空，sendSms 会补）
                     loginStep = step.copy(
-                        message = smsStep.message.ifBlank { "短信发送失败，请用浏览器验证" }
+                        smsCreditKey = creditKey,
+                        smsToken = reviewMap["token"].orEmpty()
                     )
-                    loginError = smsStep.message.ifBlank { "短信发送失败" }
+                } else {
+                    val smsStep = repository.sendSms(username.trim())
+                    if (smsStep.smsCreditKey.isNotBlank()) {
+                        loginStep = smsStep
+                    } else {
+                        // 不再丢外部链接：给明确失败提示 + 让用户重试
+                        loginError = smsStep.message.ifBlank { "短信发送失败，请重试或检查网络" }
+                        loginStep = step.copy(message = "短信发送失败")
+                    }
                 }
             } else if (step.sessionKey.isNotBlank() && step.sessionId.isNotBlank()) {
                 val ok = repository.finishLogin(step, username.trim())

@@ -34,7 +34,8 @@ import com.yunx.app.ui.viewmodel.XunleiAccountViewModel
 fun XunleiLoginScreen(
     viewModel: XunleiAccountViewModel,
     onBack: () -> Unit,
-    onSaved: () -> Unit
+    onSaved: () -> Unit,
+    onVerify: (url: String, deviceId: String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val step = viewModel.loginStep
@@ -157,27 +158,32 @@ fun XunleiLoginScreen(
                     },
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 ) { Text("重新发送验证码") }
+                Text(
+                    text = "若始终收不到短信，请确认手机号正确，或稍后重试 / 切换网络",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
 
-                // 短信发不出时的浏览器验证兜底（alist 方式：打开 reviewurl 完成人机/短信验证）
+                // 短信发不出时的应用内验证兜底（应用内 WebView 承载验证页；核心验证仍走自有短信流）
                 if (step.reviewUrl.isNotBlank()) {
                     TextButton(
                         onClick = {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(step.reviewUrl))
-                                )
-                            }
+                            // 用与登录请求一致的设备签名（deviceSign = div101.xxx）：
+                            // 验证页会把 URL 里的 deviceid 原样当 devicesign 用，
+                            // 必须与 v3/login 的 devicesign 字段一致，否则报"登录信息已过期"
+                            onVerify(step.reviewUrl, com.yunx.app.data.network.XunleiDeviceFingerprint.deviceSign())
                         },
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     ) {
                         Text(
-                            text = "短信收不到？浏览器验证",
+                            text = "短信收不到？应用内验证",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
                     Text(
-                        text = "浏览器完成验证后，返回本页重新点击「验证并登录」",
+                        text = "应用内完成验证后，返回本页重新点击「验证并登录」",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.CenterHorizontally)

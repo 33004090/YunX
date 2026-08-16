@@ -830,5 +830,25 @@ class XunleiApi(
     companion object {
         /** 设备 ID：动态生成的设备指纹（进程启动时由 Application 初始化并持久化） */
         fun newDeviceId(): String = XunleiDeviceFingerprint.deviceId()
+
+        /**
+         * 解析 reviewurl（review_panel 返回的验证面板链接）的查询参数。
+         * 响应体通常自带 creditkey / token，可优先用于自有短信登录流，而非跳外部浏览器。
+         */
+        fun parseReviewUrl(reviewUrl: String): Map<String, String> {
+            val map = mutableMapOf<String, String>()
+            runCatching {
+                val q = reviewUrl.substringAfter('?', "")
+                q.split('&').forEach { pair ->
+                    val parts = pair.split('=', limit = 2)
+                    if (parts.size == 2) {
+                        map[parts[0]] = java.net.URLDecoder.decode(parts[1], "UTF-8")
+                    } else if (parts.size == 1 && parts[0].isNotBlank()) {
+                        map[parts[0]] = ""
+                    }
+                }
+            }
+            return map
+        }
     }
 }

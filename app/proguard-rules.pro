@@ -12,6 +12,13 @@
 #   public *;
 #}
 
+# 迅雷应用内验证 WebView：保留所有 @JavascriptInterface 方法（防止 release 混淆后页面调不到桥）
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keepnames class com.yunx.app.ui.login.XunleiVerifyWebViewScreen*
+-keepnames class com.yunx.app.ui.login.XunleiLoginScreen*
+
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable
