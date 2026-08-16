@@ -59,6 +59,13 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean("notification_show_speed", value).apply()
         }
 
+    /** 桌面图标样式：0=经典图标(icon)，1=新图标(icon2)；切换经 activity-alias 动态生效 */
+    var appIconVariant: Int
+        get() = prefs.getInt("app_icon_variant", 0)
+        set(value) {
+            prefs.edit().putInt("app_icon_variant", value.coerceIn(0, 1)).apply()
+        }
+
     /** 百度网盘大文件限速提示：是否已选择「不再显示」 */
     var baiduLimitHintDismissed: Boolean
         get() = prefs.getBoolean("baidu_limit_hint_dismissed", false)

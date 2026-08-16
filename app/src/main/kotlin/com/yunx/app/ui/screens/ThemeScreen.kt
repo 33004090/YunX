@@ -1,5 +1,7 @@
 package com.yunx.app.ui.screens
 
+import android.content.ComponentName
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -15,6 +17,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,6 +48,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -86,6 +90,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -93,6 +98,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.yunx.app.R
+import com.yunx.app.data.prefs.SettingsRepository
 import com.yunx.app.ui.theme.ThemeController
 
 /** 预置主题色（Material 风格种子色） */
@@ -144,6 +151,24 @@ fun ThemeScreen(
         1
     } else {
         ThemeController.colorMode
+    }
+
+    // ---------- 桌面图标动态切换 ----------
+    val settingsRepo = remember { SettingsRepository(context) }
+    var appIconVariant by remember { mutableStateOf(settingsRepo.appIconVariant) }
+    var iconExpanded by rememberSaveable { mutableStateOf(true) }
+    val switchAppIcon: (Int) -> Unit = { variant ->
+        val pm = context.packageManager
+        val main = ComponentName(context, "com.yunx.app.MainActivity")
+        val alias = ComponentName(context, "com.yunx.app.MainActivityIcon2")
+        if (variant == 1) {
+            pm.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+            pm.setComponentEnabledSetting(main, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+        } else {
+            pm.setComponentEnabledSetting(main, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+            pm.setComponentEnabledSetting(alias, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+        }
+        settingsRepo.appIconVariant = variant
     }
 
     Scaffold(
@@ -348,13 +373,103 @@ fun ThemeScreen(
         }
 
             Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "提示：修改后即时生效并保存在本机。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
+
+            // ---------- 桌面图标（可折叠卡片） ----------
+            SectionLabel("桌面图标")
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            ) {
+                Column {
+                    // Header：点击展开/收起
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { iconExpanded = !iconExpanded }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.StarOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "桌面图标",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            // 与主题色卡片一致的副标题动画：展开时隐藏、收起时显示
+                            AnimatedVisibility(
+                                visible = !iconExpanded,
+                                enter = fadeIn(tween(200)) + expandVertically(tween(200), expandFrom = Alignment.Top),
+                                exit = fadeOut(tween(200)) + shrinkVertically(tween(200), shrinkTowards = Alignment.Top)
+                            ) {
+                                Text(
+                                    text = if (appIconVariant == 1) "新图标" else "经典图标",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                        }
+                        val iconRotation by animateFloatAsState(
+                            targetValue = if (iconExpanded) 180f else 0f,
+                            label = "iconArrow",
+                            animationSpec = tween(200)
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.rotate(iconRotation)
+                        )
+                    }
+                    AnimatedVisibility(
+                        visible = iconExpanded,
+                        enter = fadeIn(tween(200)) + expandVertically(tween(200), expandFrom = Alignment.Top),
+                        exit = fadeOut(tween(150)) + shrinkVertically(tween(150), shrinkTowards = Alignment.Top)
+                    ) {
+                        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(24.dp)
+                            ) {
+                                AppIconOption(
+                                    iconRes = R.drawable.icon,
+                                    name = "经典图标",
+                                    isSelected = appIconVariant == 0,
+                                    onClick = {
+                                        appIconVariant = 0
+                                        switchAppIcon(0)
+                                    }
+                                )
+                                AppIconOption(
+                                    iconRes = R.drawable.icon2,
+                                    name = "新图标",
+                                    isSelected = appIconVariant == 1,
+                                    onClick = {
+                                        appIconVariant = 1
+                                        switchAppIcon(1)
+                                    }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "Android 12+ 立即生效；部分设备需回到桌面或重启启动器后查看。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 
@@ -736,6 +851,62 @@ private fun VerticalHueSlider(
 }
 
 // ================= 辅助 =================
+
+/** 桌面图标选项：图标预览 + 名称，选中高亮边框 + 角标对勾 */
+@Composable
+private fun AppIconOption(
+    iconRes: Int,
+    name: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .border(
+                    width = if (isSelected) 3.dp else 1.dp,
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(iconRes),
+                contentDescription = name,
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(14.dp))
+            )
+            if (isSelected) {
+                // 右上角选中角标（对勾 + 主题色圆底）
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(20.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Check,
+                        contentDescription = "已选择",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = name,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+        )
+    }
+}
 
 @Composable
 private fun SectionLabel(text: String) {

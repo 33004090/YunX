@@ -36,6 +36,20 @@
             </intent-filter>
         </activity>
 
+        <!-- 桌面图标动态切换（新图标 icon2）：默认禁用，主题与外观页切换后经 setComponentEnabledSetting 启用 -->
+        <activity-alias
+            android:name=".MainActivityIcon2"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/icon2"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- 崩溃界面：独立进程运行，避免主线程崩溃后无法展示 UI -->
         <activity
             android:name=".crash.CrashActivity"

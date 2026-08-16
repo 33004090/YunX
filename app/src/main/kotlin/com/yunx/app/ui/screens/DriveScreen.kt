@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -193,6 +194,8 @@ fun DriveScreen(
     LaunchedEffect(Unit) {
         driveQuotaViewModel.loadAll()
     }
+    // 下拉刷新状态：绑定空间配额加载中状态
+    val isRefreshing by driveQuotaViewModel.loading.collectAsState()
 
     // 账号列表 ↔ 夸克云盘 ↔ UC 云盘 ↔ 迅雷云盘 ↔ 百度云盘 ↔ 139 云盘 ↔ 123 云盘：平滑过渡（淡入 + 轻微缩放，不僵硬）
     AnimatedContent(
@@ -248,7 +251,12 @@ fun DriveScreen(
             onExit = { showPan123Cloud = false },
             onDownloadStarted = onDownloadStarted
         )
-            else -> LazyColumn(
+            else -> PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = { driveQuotaViewModel.loadAll() },
+                modifier = Modifier.fillMaxSize()
+            ) {
+                LazyColumn(
                 modifier = modifier
                     .fillMaxSize()
                     .nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -362,6 +370,7 @@ fun DriveScreen(
                 items(others, key = { it.id }) { account ->
                     DriveAccountCard(account = account)
                 }
+            }
             }
         }
     }
