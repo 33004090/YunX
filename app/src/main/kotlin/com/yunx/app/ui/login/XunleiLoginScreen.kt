@@ -40,6 +40,7 @@ fun XunleiLoginScreen(
     val context = LocalContext.current
     val step = viewModel.loginStep
     val error = viewModel.loginError
+    val smsSent = viewModel.smsSent
     // collectAsState 订阅账号：登录成功后 account 变非空，必触发重组 → 自动关闭登录页
     val account by viewModel.xunleiAccount.collectAsState()
 
@@ -94,7 +95,8 @@ fun XunleiLoginScreen(
             )
             Text(
                 text = if (step?.needSms == true) {
-                    "账号密码登录触发安全验证，已向 ${username} 发送短信验证码"
+                    if (smsSent) "账号密码登录触发安全验证，验证码已发送至 ${username}"
+                    else "账号密码登录触发安全验证，请点击下方「发送验证码」"
                 } else {
                     "使用迅雷账号登录，支持解析与下载分享文件"
                 },
@@ -151,13 +153,24 @@ fun XunleiLoginScreen(
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     enabled = smsCode.isNotBlank()
                 ) { Text("验证并登录") }
-                TextButton(
-                    onClick = {
-                        viewModel.sendSms(username)
-                        SnackbarController.show("验证码已发送")
-                    },
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                ) { Text("重新发送验证码") }
+                if (!smsSent) {
+                    // 进入界面不会自动发送验证码：主按钮「发送验证码」提示用户主动获取
+                    FilledTonalButton(
+                        onClick = {
+                            viewModel.sendSms(username)
+                            SnackbarController.show("验证码已发送")
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) { Text("发送验证码") }
+                } else {
+                    TextButton(
+                        onClick = {
+                            viewModel.sendSms(username)
+                            SnackbarController.show("验证码已发送")
+                        },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) { Text("重新发送验证码") }
+                }
                 Text(
                     text = "若始终收不到短信，请确认手机号正确，或稍后重试 / 切换网络",
                     style = MaterialTheme.typography.labelSmall,
@@ -183,7 +196,7 @@ fun XunleiLoginScreen(
                         )
                     }
                     Text(
-                        text = "应用内完成验证后，返回本页重新点击「验证并登录」",
+                        text = "应用内完成验证后，将自动重新登录",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.CenterHorizontally)

@@ -474,9 +474,11 @@ fun MainScreen() {
             deviceId = xunleiVerifyDeviceId,
             onResult = { success, _ ->
                 showXunleiVerify = false
-                showXunleiLogin = true // 回到登录页短信步骤，用户可继续「验证并登录」
+                showXunleiLogin = true // 回到登录页
                 if (success) {
-                    SnackbarController.show("验证完成，请返回登录页继续")
+                    // 设备已验证受信任：自动重试密码登录（应直接成功并自动关闭登录页）
+                    SnackbarController.show("验证完成，正在自动登录…")
+                    xunleiViewModel.retryLoginAfterVerify()
                 } else {
                     SnackbarController.show("验证未完成，请重试")
                 }

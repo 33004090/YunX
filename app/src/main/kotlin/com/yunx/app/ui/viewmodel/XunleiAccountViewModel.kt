@@ -37,22 +37,34 @@ class XunleiAccountViewModel(
     var loginError by androidx.compose.runtime.mutableStateOf<String?>(null)
         private set
 
+    /** 短信验证码是否已发送（进入短信界面不会自动发送；区分「发送验证码」/「重新发送验证码」） */
+    var smsSent by androidx.compose.runtime.mutableStateOf(false)
+        private set
+
+    /** 最近一次密码登录凭据（WebView 验证成功后自动重试登录用，仅内存，不持久化） */
+    private var lastUsername = ""
+    private var lastPassword = ""
+
     fun consumeLoginError() {
         loginError = null
     }
 
     /** 账号密码登录 */
     fun login(username: String, password: String) {
+        lastUsername = username.trim()
+        lastPassword = password
         viewModelScope.launch {
             loginError = null
             loginStep = null
+            smsSent = false
             val step = repository.loginWithPassword(username.trim(), password)
             if (step.needSms) {
                 // 触发安全验证：优先用 reviewurl 里的 creditkey（风控响应自带），否则走自有 sendSms
                 val reviewMap = XunleiApi.parseReviewUrl(step.reviewUrl)
                 val creditKey = reviewMap["creditkey"].orEmpty()
                 if (creditKey.isNotBlank()) {
-                    // 直接用响应里的 creditkey/token 进入短信输入步骤（token 可能为空，sendSms 会补）
+                    // 直接用响应里的 creditkey/token 进入短信输入步骤（token 可能为空，sendSms 会补）；
+                    // 进入界面不会自动发送验证码，smsSent 保持 false，UI 显示「发送验证码」
                     loginStep = step.copy(
                         smsCreditKey = creditKey,
                         smsToken = reviewMap["token"].orEmpty()
@@ -60,6 +72,7 @@ class XunleiAccountViewModel(
                 } else {
                     val smsStep = repository.sendSms(username.trim())
                     if (smsStep.smsCreditKey.isNotBlank()) {
+                        smsSent = true
                         loginStep = smsStep
                     } else {
                         // 不再丢外部链接：给明确失败提示 + 让用户重试
@@ -76,11 +89,19 @@ class XunleiAccountViewModel(
         }
     }
 
+    /** WebView 验证成功后自动重试登录（设备已验证受信任，密码登录应直接成功） */
+    fun retryLoginAfterVerify() {
+        if (lastUsername.isNotBlank() && lastPassword.isNotBlank()) {
+            login(lastUsername, lastPassword)
+        }
+    }
+
     /** 发送短信验证码（密码登录触发验证后） */
     fun sendSms(mobile: String) {
         viewModelScope.launch {
             loginError = null
             val step = repository.sendSms(mobile.trim())
+            if (step.smsCreditKey.isNotBlank()) smsSent = true
             loginStep = step
             if (step.smsCreditKey.isBlank()) loginError = step.message
         }
