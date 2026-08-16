@@ -263,6 +263,14 @@ class ResolveViewModel(
     var batchProgress by mutableStateOf<String?>(null)
         private set
 
+    /** 批量处理中断请求（UI 点「中断」后置 true，批量循环中检查并跳出） */
+    private var batchCancelRequested = false
+
+    /** 中断当前批量处理（批量下载/批量转存） */
+    fun cancelBatch() {
+        batchCancelRequested = true
+    }
+
     fun enterMultiSelect(file: ShareFile) {
         multiSelectMode = true
         _selected.clear()
@@ -292,6 +300,7 @@ class ResolveViewModel(
         val s = session ?: return
         viewModelScope.launch {
             isBatchWorking = true
+            batchCancelRequested = false
             try {
                 val credential = currentCredential()
                 if (credential.isNullOrBlank()) {
@@ -299,7 +308,14 @@ class ResolveViewModel(
                     return@launch
                 }
                 var okCount = 0
-                files.forEach { file ->
+                var interrupted = false
+                for (file in files) {
+                    // 用户点击「中断」：停止剩余项，已转存的不回滚
+                    if (batchCancelRequested) {
+                        interrupted = true
+                        downloadError = "已中断批量转存"
+                        break
+                    }
                     runCatching {
                         when (currentPlatform) {
                             SharePlatform.XUNLEI -> {
@@ -328,10 +344,13 @@ class ResolveViewModel(
                         }
                     }.onSuccess { okCount++ }
                 }
-                downloadError = if (okCount > 0) "已转存 $okCount 项到${platformName()}" else "转存失败"
+                if (!interrupted) {
+                    downloadError = if (okCount > 0) "已转存 $okCount 项到${platformName()}" else "转存失败"
+                }
                 exitMultiSelect()
             } finally {
                 isBatchWorking = false
+                batchCancelRequested = false
             }
         }
     }
@@ -343,6 +362,7 @@ class ResolveViewModel(
         viewModelScope.launch {
             isBatchWorking = true
             batchProgress = "正在收集文件…"
+            batchCancelRequested = false
             try {
                 val credential = currentCredential()
                 if (credential.isNullOrBlank()) {
@@ -370,7 +390,15 @@ class ResolveViewModel(
                     return@launch
                 }
                 var okCount = 0
-                tasks.forEachIndexed { index, (file, relPath) ->
+                var interrupted = false
+                for ((index, task) in tasks.withIndex()) {
+                    // 用户点击「中断」：停止剩余项，已入队的任务保留下载
+                    if (batchCancelRequested) {
+                        interrupted = true
+                        downloadError = "已中断批量下载"
+                        break
+                    }
+                    val (file, relPath) = task
                     batchProgress = "${index + 1}/${tasks.size}"
                     runCatching {
                         currentRepo().getShareDownloadLink(s, file, quarkCred).getOrNull()?.let { link ->
@@ -380,13 +408,16 @@ class ResolveViewModel(
                         }
                     }
                 }
-                downloadError = if (okCount > 0) "已加入 $okCount 个下载任务" else "获取下载链接失败"
+                if (!interrupted) {
+                    downloadError = if (okCount > 0) "已加入 $okCount 个下载任务" else "获取下载链接失败"
+                    // 全部获取完再一次性切到下载页
+                    if (okCount > 0) downloadStarted = true
+                }
                 exitMultiSelect()
-                // 全部获取完再一次性切到下载页
-                if (okCount > 0) downloadStarted = true
             } finally {
                 isBatchWorking = false
                 batchProgress = null
+                batchCancelRequested = false
             }
         }
     }

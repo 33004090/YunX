@@ -1,5 +1,7 @@
 package com.yunx.app.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -16,11 +18,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VolunteerActivism
 import androidx.compose.material3.AlertDialog
@@ -48,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.backup.AuthBackupManager
+import com.yunx.app.data.update.UpdateChecker
 import com.yunx.app.ui.SnackbarController
 import com.yunx.app.util.LogExporter
 import kotlinx.coroutines.Dispatchers
@@ -58,7 +61,7 @@ import kotlinx.coroutines.withContext
 private val threadOptions = listOf(1, 2, 4, 8, 16, 32, 64, 128, 256, 512)
 
 /**
- * 设置页：下载线程数设置 + 崩溃测试入口。
+ * 设置页：下载线程数设置 + 主题外观 + 检查更新 + 日志与网盘认证。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,6 +77,8 @@ fun SettingsScreen(
 ) {
     var showThreadsDialog by remember { mutableStateOf(false) }
     var showLogDialog by remember { mutableStateOf(false) }
+    // 检查更新结果（非空时弹更新对话框）
+    var updateRelease by remember { mutableStateOf<UpdateChecker.Release?>(null) }
     // 本地状态：修改后立即刷新 UI，同时同步外部保存值
     var threads by remember { mutableStateOf(downloadThreads) }
     LaunchedEffect(downloadThreads) { threads = downloadThreads }
@@ -132,11 +137,22 @@ fun SettingsScreen(
 
         SectionLabel("通用")
         SettingsItem(
-            icon = Icons.Outlined.BugReport,
-            title = "崩溃测试",
-            description = "触发一次异常，验证全局崩溃捕获",
+            icon = Icons.Outlined.SystemUpdate,
+            title = "检查更新",
+            description = "检查 GitHub 是否有新版本可用",
             onClick = {
-                throw RuntimeException("手动触发的崩溃测试")
+                scope.launch {
+                    SnackbarController.show("正在检查更新…")
+                    val release = runCatching { UpdateChecker.fetchLatestRelease() }.getOrNull()
+                    val current = UpdateChecker.currentVersion(context)
+                    if (release == null) {
+                        SnackbarController.show("检查更新失败，请检查网络")
+                    } else if (UpdateChecker.compareVersions(release.tagName, current) > 0) {
+                        updateRelease = release
+                    } else {
+                        SnackbarController.show("已是最新版本")
+                    }
+                }
             }
         )
 
@@ -260,6 +276,34 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showLogDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // 检查更新结果弹窗（发现新版本时展示，下载走系统浏览器）
+    updateRelease?.let { release ->
+        UpdateDialog(
+            currentVersion = UpdateChecker.currentVersion(context),
+            release = release,
+            onDownload = {
+                updateRelease = null
+                val apk = release.assets.firstOrNull { it.name.endsWith(".apk", true) }
+                if (apk != null) {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apk.downloadUrl)))
+                    }
+                    SnackbarController.show("正在下载 ${apk.name}")
+                } else {
+                    SnackbarController.show("未找到 APK 下载链接")
+                }
+            },
+            onLater = { updateRelease = null },
+            onIgnore = {
+                context.getSharedPreferences("yunx_prefs", android.content.Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("ignored_version", release.tagName)
+                    .apply()
+                updateRelease = null
             }
         )
     }

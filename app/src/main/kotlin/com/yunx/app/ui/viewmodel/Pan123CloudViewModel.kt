@@ -57,6 +57,7 @@ class Pan123CloudViewModel(
         private set
     var folderProgress by mutableStateOf<String?>(null)
         private set
+    private var downloadCancelRequested = false
     var refreshing by mutableStateOf(false)
         private set
     var downloadTriggered by mutableStateOf(0)
@@ -160,6 +161,11 @@ class Pan123CloudViewModel(
         downloadTriggered = 0
     }
 
+    /** 中断当前下载（批量下载/文件夹下载） */
+    fun cancelDownload() {
+        downloadCancelRequested = true
+    }
+
     // ---------- 移动目标浏览 ----------
 
     fun openMoveRoot() {
@@ -232,6 +238,7 @@ class Pan123CloudViewModel(
         viewModelScope.launch {
             isOperating = true
             folderProgress = "正在收集文件…"
+            downloadCancelRequested = false
             try {
                 val tk = token()
                 val tasks = mutableListOf<Pair<ShareFile, String>>()
@@ -243,6 +250,8 @@ class Pan123CloudViewModel(
                 }
                 var okCount = 0
                 tasks.forEachIndexed { index, (file, relPath) ->
+                    // 用户点击「中断」：跳过剩余项（已入队任务保留下载）
+                    if (downloadCancelRequested) return@forEachIndexed
                     folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
                         val link = api.getDownloadLink(file, tk) ?: return@runCatching
@@ -255,6 +264,11 @@ class Pan123CloudViewModel(
                         okCount++
                     }
                 }
+                if (downloadCancelRequested) {
+                    cloudMessage = "已中断下载"
+                    actionFile = null
+                    return@launch
+                }
                 cloudMessage = "已加入 $okCount 个下载任务"
                 actionFile = null
             } catch (e: Exception) {
@@ -262,6 +276,7 @@ class Pan123CloudViewModel(
             } finally {
                 isOperating = false
                 folderProgress = null
+                downloadCancelRequested = false
             }
         }
     }
@@ -376,6 +391,7 @@ class Pan123CloudViewModel(
         viewModelScope.launch {
             isOperating = true
             folderProgress = "正在收集文件…"
+            downloadCancelRequested = false
             try {
                 val tk = token()
                 val tasks = mutableListOf<Pair<ShareFile, String>>()
@@ -393,6 +409,8 @@ class Pan123CloudViewModel(
                 }
                 var okCount = 0
                 tasks.forEachIndexed { index, (file, relPath) ->
+                    // 用户点击「中断」：跳过剩余项（已入队任务保留下载）
+                    if (downloadCancelRequested) return@forEachIndexed
                     folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
                         val link = api.getDownloadLink(file, tk) ?: return@runCatching
@@ -405,6 +423,11 @@ class Pan123CloudViewModel(
                         okCount++
                     }
                 }
+                if (downloadCancelRequested) {
+                    cloudMessage = "已中断批量下载"
+                    exitMultiSelect()
+                    return@launch
+                }
                 cloudMessage = "已加入 $okCount 个下载任务"
                 exitMultiSelect()
             } catch (e: Exception) {
@@ -412,6 +435,7 @@ class Pan123CloudViewModel(
             } finally {
                 isOperating = false
                 folderProgress = null
+                downloadCancelRequested = false
             }
         }
     }

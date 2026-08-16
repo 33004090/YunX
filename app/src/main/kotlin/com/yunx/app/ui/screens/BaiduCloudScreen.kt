@@ -441,6 +441,11 @@ fun BaiduCloudScreen(
         AlertDialog(
             onDismissRequest = { },
             confirmButton = { },
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelDownload() }) {
+                    Text("中断", color = MaterialTheme.colorScheme.error)
+                }
+            },
             title = { Text("处理中") },
             text = {
                 Row(verticalAlignment = Alignment.CenterVertically) {

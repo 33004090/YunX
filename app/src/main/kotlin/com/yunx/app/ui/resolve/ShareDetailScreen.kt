@@ -328,11 +328,16 @@ fun ShareDetailScreen(
         )
     }
 
-    // 批量处理中：加载弹窗（批量下载显示获取进度，如 "正在获取下载链接 2/5"）
+    // 批量处理中：加载弹窗（批量下载显示获取进度，如 "正在获取下载链接 2/5"；可中断）
     if (viewModel.isBatchWorking) {
         AlertDialog(
             onDismissRequest = { },
             confirmButton = { },
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelBatch() }) {
+                    Text("中断", color = MaterialTheme.colorScheme.error)
+                }
+            },
             title = { Text("批量处理中") },
             text = {
                 Row(verticalAlignment = Alignment.CenterVertically) {

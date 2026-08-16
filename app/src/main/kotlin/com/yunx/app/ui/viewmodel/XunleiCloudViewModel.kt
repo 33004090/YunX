@@ -53,6 +53,7 @@ class XunleiCloudViewModel(
         private set
     var folderProgress by mutableStateOf<String?>(null)
         private set
+    private var downloadCancelRequested = false
     var refreshing by mutableStateOf(false)
         private set
     var downloadTriggered by mutableStateOf(0)
@@ -161,6 +162,11 @@ class XunleiCloudViewModel(
         downloadTriggered = 0
     }
 
+    /** 中断当前下载（批量下载/文件夹下载） */
+    fun cancelDownload() {
+        downloadCancelRequested = true
+    }
+
     // ---------- 移动目标浏览 ----------
 
     fun openMoveRoot() {
@@ -240,6 +246,7 @@ class XunleiCloudViewModel(
         viewModelScope.launch {
             isOperating = true
             folderProgress = "正在收集文件…"
+            downloadCancelRequested = false
             try {
                 val c = creds() ?: throw IllegalStateException("请先登录迅雷网盘")
                 val tasks = mutableListOf<Pair<ShareFile, String>>()
@@ -251,6 +258,8 @@ class XunleiCloudViewModel(
                 }
                 var okCount = 0
                 tasks.forEachIndexed { index, (file, relPath) ->
+                    // 用户点击「中断」：跳过剩余项（已入队任务保留下载）
+                    if (downloadCancelRequested) return@forEachIndexed
                     folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
                         val link = api.getFileDetail(file.fid, c.first, c.second, c.third)
@@ -264,6 +273,11 @@ class XunleiCloudViewModel(
                         okCount++
                     }
                 }
+                if (downloadCancelRequested) {
+                    cloudMessage = "已中断下载"
+                    actionFile = null
+                    return@launch
+                }
                 cloudMessage = "已加入 $okCount 个下载任务"
                 actionFile = null
             } catch (e: Exception) {
@@ -271,6 +285,7 @@ class XunleiCloudViewModel(
             } finally {
                 isOperating = false
                 folderProgress = null
+                downloadCancelRequested = false
             }
         }
     }
@@ -397,6 +412,7 @@ class XunleiCloudViewModel(
         viewModelScope.launch {
             isOperating = true
             folderProgress = "正在收集文件…"
+            downloadCancelRequested = false
             try {
                 val c = creds() ?: throw IllegalStateException("请先登录迅雷网盘")
                 // 展开选中项：文件直接加入，文件夹递归收集
@@ -416,6 +432,8 @@ class XunleiCloudViewModel(
                 var okCount = 0
                 var failCount = 0
                 tasks.forEachIndexed { index, (file, relPath) ->
+                    // 用户点击「中断」：跳过剩余项（已入队任务保留下载）
+                    if (downloadCancelRequested) return@forEachIndexed
                     folderProgress = "正在加入下载 ${index + 1}/${tasks.size}"
                     runCatching {
                         val link = api.getFileDetail(file.fid, c.first, c.second, c.third)
@@ -429,6 +447,11 @@ class XunleiCloudViewModel(
                         okCount++
                     }
                 }
+                if (downloadCancelRequested) {
+                    cloudMessage = "已中断批量下载"
+                    exitMultiSelect()
+                    return@launch
+                }
                 cloudMessage = if (failCount > 0) {
                     "已加入 $okCount 个下载任务（$failCount 个失败）"
                 } else {
@@ -440,6 +463,7 @@ class XunleiCloudViewModel(
             } finally {
                 isOperating = false
                 folderProgress = null
+                downloadCancelRequested = false
             }
         }
     }

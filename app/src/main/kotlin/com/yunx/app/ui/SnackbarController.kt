@@ -14,18 +14,32 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * 全局 Snackbar 通道：任何位置（Composable / 工具函数）调用 show() 即可显示。
- * 页面层使用 GlobalSnackbarHost() 渲染监听；同一时刻只有一个页面在组合中，不会重复显示。
+ * 页面层使用 GlobalSnackbarHost() / rememberGlobalSnackbarHostState() 渲染监听。
+ *
+ * 修复要点：多条消息并发时不会互相覆盖——每条 show() 都生成自增序号的独立事件，
+ * consume(seq) 只清空"刚显示的那条"，期间新来的消息保留排队，前一条消失后继续显示。
+ * 多个宿主（MainScreen / 各 Sheet / 各 LoginScreen）同时活跃时共享广播，各自渲染。
  */
 object SnackbarController {
-    private val _events = MutableStateFlow<String?>(null)
-    val events: StateFlow<String?> = _events
+    internal data class Event(val seq: Long, val message: String)
+
+    private val _events = MutableStateFlow<Event?>(null)
+    private var seq = 0L
+
+    internal val events: StateFlow<Event?> = _events
 
     fun show(message: String) {
-        _events.value = message
+        // 每次 show 都是新 Event（seq 递增），StateFlow 值必然变化 → 所有收集者都会收到
+        _events.value = Event(++seq, message)
     }
 
-    fun consume() {
-        _events.value = null
+    /**
+     * 消费（清空）事件：仅当当前事件就是刚刚显示的那条时置空，
+     * 避免清空动作覆盖期间新 show 进来的消息（这是旧实现丢失第二条的根因）。
+     */
+    fun consume(shownSeq: Long) {
+        val cur = _events.value
+        if (cur != null && cur.seq == shownSeq) _events.value = null
     }
 }
 
@@ -34,10 +48,10 @@ object SnackbarController {
 fun GlobalSnackbarHost(modifier: Modifier = Modifier) {
     val hostState = remember { SnackbarHostState() }
     LaunchedEffect(hostState) {
-        SnackbarController.events.collect { msg ->
-            if (msg != null) {
-                hostState.showSnackbar(msg)
-                SnackbarController.consume()
+        SnackbarController.events.collect { event ->
+            if (event != null) {
+                hostState.showSnackbar(event.message)
+                SnackbarController.consume(event.seq)
             }
         }
     }
@@ -51,10 +65,10 @@ fun GlobalSnackbarHost(modifier: Modifier = Modifier) {
 fun rememberGlobalSnackbarHostState(): SnackbarHostState {
     val hostState = remember { SnackbarHostState() }
     LaunchedEffect(hostState) {
-        SnackbarController.events.collect { msg ->
-            if (msg != null) {
-                hostState.showSnackbar(msg)
-                SnackbarController.consume()
+        SnackbarController.events.collect { event ->
+            if (event != null) {
+                hostState.showSnackbar(event.message)
+                SnackbarController.consume(event.seq)
             }
         }
     }
