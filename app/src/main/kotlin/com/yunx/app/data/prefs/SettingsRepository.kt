@@ -24,6 +24,27 @@ class SettingsRepository(context: Context) {
             prefs.edit().putString("download_dir_uri", value).apply()
         }
 
+    /** 最大同时下载任务数（默认 3，范围 1-10） */
+    var maxConcurrentDownloads: Int
+        get() = prefs.getInt("max_concurrent_downloads", DEFAULT_MAX_CONCURRENT_DOWNLOADS)
+        set(value) {
+            prefs.edit().putInt("max_concurrent_downloads", value.coerceIn(1, 10)).apply()
+        }
+
+    /** 下载速度限制（字节/秒；0 = 不限速） */
+    var downloadSpeedLimit: Long
+        get() = prefs.getLong("download_speed_limit", 0L)
+        set(value) {
+            prefs.edit().putLong("download_speed_limit", value.coerceAtLeast(0L)).apply()
+        }
+
+    /** 下载失败后自动重试次数（默认 3，范围 0-10） */
+    var downloadRetryCount: Int
+        get() = prefs.getInt("download_retry_count", DEFAULT_DOWNLOAD_RETRY_COUNT)
+        set(value) {
+            prefs.edit().putInt("download_retry_count", value.coerceIn(0, 10)).apply()
+        }
+
     /** 百度网盘大文件限速提示：是否已选择「不再显示」 */
     var baiduLimitHintDismissed: Boolean
         get() = prefs.getBoolean("baidu_limit_hint_dismissed", false)
@@ -54,6 +75,8 @@ class SettingsRepository(context: Context) {
 
     companion object {
         const val DEFAULT_DOWNLOAD_THREADS = 16
+        const val DEFAULT_MAX_CONCURRENT_DOWNLOADS = 3
+        const val DEFAULT_DOWNLOAD_RETRY_COUNT = 3
 
         /** 默认主题种子色：Material Blue（与内置默认方案一致） */
         const val DEFAULT_SEED_COLOR = 0xFF415F91L

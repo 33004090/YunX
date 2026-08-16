@@ -238,7 +238,11 @@ fun MainScreen() {
             downloader = ChunkDownloader(downloadClient),
             threadProvider = settings::downloadThreads,
             // 自定义下载保存目录（SAF tree Uri），设置页可选，动态生效
-            saveDirProvider = { settings.downloadDirUri }
+            saveDirProvider = { settings.downloadDirUri },
+            // 网络与下载策略（设置页可调，动态生效）：并发任务数 / 全局限速 / 失败重试
+            concurrencyProvider = { settings.maxConcurrentDownloads },
+            speedLimitProvider = { settings.downloadSpeedLimit },
+            retryCountProvider = { settings.downloadRetryCount }
         )
     }
     // Android 9- 写公共 Download 需要 WRITE_EXTERNAL_STORAGE 运行时授权：

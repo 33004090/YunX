@@ -21,8 +21,11 @@ import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VolunteerActivism
@@ -101,6 +104,13 @@ fun SettingsScreen(
     // 下载保存目录（SAF）：本地状态驱动 UI 刷新，同时同步 SharedPreferences
     val settingsRepo = remember { SettingsRepository(context) }
     var downloadDirUri by remember { mutableStateOf(settingsRepo.downloadDirUri) }
+    // 网络与下载策略（本地状态驱动 UI，同时同步 SharedPreferences）
+    var maxConcurrent by remember { mutableStateOf(settingsRepo.maxConcurrentDownloads) }
+    var speedLimitBps by remember { mutableStateOf(settingsRepo.downloadSpeedLimit) }
+    var retryCount by remember { mutableStateOf(settingsRepo.downloadRetryCount) }
+    var showConcurrencyDialog by remember { mutableStateOf(false) }
+    var showSpeedDialog by remember { mutableStateOf(false) }
+    var showRetryDialog by remember { mutableStateOf(false) }
     val dirLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -189,6 +199,34 @@ fun SettingsScreen(
             } else {
                 null
             }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 网络与下载策略
+        SettingsItem(
+            icon = Icons.Outlined.Layers,
+            title = "最大同时下载任务数",
+            description = "同时下载 $maxConcurrent 个任务（限制后台并发，避免占满带宽）",
+            onClick = { showConcurrencyDialog = true }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SettingsItem(
+            icon = Icons.Outlined.Speed,
+            title = "下载速度限制",
+            description = speedLimitText(speedLimitBps),
+            onClick = { showSpeedDialog = true }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SettingsItem(
+            icon = Icons.Outlined.Refresh,
+            title = "失败自动重试",
+            description = if (retryCount == 0) "失败后不自动重试" else "失败后自动重试 $retryCount 次（断点续传）",
+            onClick = { showRetryDialog = true }
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -471,6 +509,149 @@ fun SettingsScreen(
             }
         )
     }
+
+    // 最大同时下载任务数
+    if (showConcurrencyDialog) {
+        val options = listOf(1, 2, 3, 5, 8)
+        AlertDialog(
+            onDismissRequest = { showConcurrencyDialog = false },
+            title = { Text("最大同时下载任务数") },
+            text = {
+                Column {
+                    options.forEach { v ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = maxConcurrent == v,
+                                onClick = {
+                                    maxConcurrent = v
+                                    settingsRepo.maxConcurrentDownloads = v
+                                    showConcurrencyDialog = false
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("同时下载 $v 个任务", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showConcurrencyDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // 下载速度限制：预设档位 + 自定义（KB/s）
+    if (showSpeedDialog) {
+        val presets = listOf(0L, 1L * 1024 * 1024, 2L * 1024 * 1024, 5L * 1024 * 1024, 10L * 1024 * 1024)
+        var customKb by remember { mutableStateOf("") }
+        val isCustom = speedLimitBps > 0 && speedLimitBps !in presets
+        AlertDialog(
+            onDismissRequest = { showSpeedDialog = false },
+            title = { Text("下载速度限制") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    presets.forEach { v ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = !isCustom && speedLimitBps == v,
+                                onClick = {
+                                    speedLimitBps = v
+                                    settingsRepo.downloadSpeedLimit = v
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (v == 0L) "不限速" else speedLimitText(v),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                    // 自定义档位
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = isCustom,
+                            onClick = {
+                                // 选中自定义：聚焦输入框（保留当前值换算）
+                                if (speedLimitBps > 0 && speedLimitBps !in presets) {
+                                    customKb = (speedLimitBps / 1024).toString()
+                                }
+                            }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = customKb,
+                            onValueChange = { customKb = it.filter(Char::isDigit).take(6) },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("自定义 KB/s") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        // 自定义输入非空时按自定义生效
+                        val kb = customKb.toLongOrNull()?.coerceAtLeast(1L)
+                        if (kb != null) {
+                            speedLimitBps = kb * 1024
+                            settingsRepo.downloadSpeedLimit = kb * 1024
+                        }
+                        showSpeedDialog = false
+                    }
+                ) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSpeedDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // 失败自动重试次数
+    if (showRetryDialog) {
+        val options = listOf(0, 1, 2, 3, 5, 8, 10)
+        AlertDialog(
+            onDismissRequest = { showRetryDialog = false },
+            title = { Text("失败自动重试") },
+            text = {
+                Column {
+                    options.forEach { v ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = retryCount == v,
+                                onClick = {
+                                    retryCount = v
+                                    settingsRepo.downloadRetryCount = v
+                                    showRetryDialog = false
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (v == 0) "不自动重试" else "失败后自动重试 $v 次",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRetryDialog = false }) { Text("取消") }
+            }
+        )
+    }
 }
 
 /** 导出网盘认证弹窗：AES 加密密码（可留空）+ 导出范围（仅已登录 / 全部绑定） */
@@ -666,5 +847,16 @@ private fun RadioThreadRow(
             text = "$value 线程",
             style = MaterialTheme.typography.bodyLarge
         )
+    }
+}
+
+/** 速度限制展示文案：0=不限速；>=1MB/s 显示 MB/s，否则 KB/s */
+private fun speedLimitText(bps: Long): String {
+    if (bps <= 0) return "不限速"
+    return if (bps >= 1024 * 1024) {
+        val mb = bps / (1024.0 * 1024.0)
+        if (mb >= 10) String.format("%.0f MB/s", mb) else String.format("%.1f MB/s", mb)
+    } else {
+        "${bps / 1024} KB/s"
     }
 }

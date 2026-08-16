@@ -66,9 +66,21 @@ class DownloadManager(
     /** 下载线程数提供者（可在设置中修改，动态生效），默认 16 */
     private val threadProvider: () -> Int = { 16 },
     /** 自定义下载保存目录提供者（SAF tree Uri，可空）；null 时保存到系统默认 Download */
-    private val saveDirProvider: () -> String? = { null }
+    private val saveDirProvider: () -> String? = { null },
+    /** 最大同时下载任务数提供者（默认 3）：限制后台并发任务，避免占满带宽/耗尽路由器连接 */
+    private val concurrencyProvider: () -> Int = { 3 },
+    /** 全局下载速度限制提供者（字节/秒；0 = 不限速） */
+    private val speedLimitProvider: () -> Long = { 0L },
+    /** 下载失败后自动重试次数提供者（默认 3，上限 10） */
+    private val retryCountProvider: () -> Int = { 3 }
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** 当前实际下载中的任务数（用于最大同时下载任务数限制） */
+    private val activeDownloads = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** 全局限速器（令牌桶）：所有任务合计不超过 speedLimitProvider 的字节/秒 */
+    private val speedLimiter = SpeedLimiter()
 
     /**
      * 保存前存储权限检查（Android 9- 写公共 Download 需 WRITE_EXTERNAL_STORAGE 运行时授权）。
@@ -176,7 +188,7 @@ class DownloadManager(
                     onTaskStarted(id)
                     // 任务级互斥：同一任务串行执行，暂停后立刻恢复不会并发写分片
                     taskLocks.getOrPut(id) { Mutex() }.withLock {
-                        runTask(id, effectiveHeaders)
+                        runTaskWithRetry(id, effectiveHeaders)
                     }
                 } catch (e: CancellationException) {
                     // 主动暂停/删除：part 文件保留（或由 remove 清理）；状态已由调用方设置
@@ -277,6 +289,48 @@ class DownloadManager(
     /** 当前协程是否仍活跃（暂停/删除触发取消后为 false） */
     private suspend fun isTaskActive(): Boolean = coroutineContext[Job]?.isActive == true
 
+    /** 等待并发许可：当前下载任务数 >= 上限时轮询等待（暂停/取消可退出等待） */
+    private suspend fun awaitConcurrencySlot() {
+        val max = concurrencyProvider().coerceAtLeast(1)
+        while (isTaskActive() && activeDownloads.get() >= max) {
+            delay(300)
+        }
+    }
+
+    /**
+     * 执行任务并支持失败自动重试（断点续传，part 文件保留）。
+     * 同时负责「最大同时下载任务数」并发许可的获取/释放。
+     */
+    private suspend fun runTaskWithRetry(id: Long, headers: Map<String, String>) {
+        var attempts = 0
+        val maxRetries = retryCountProvider().coerceIn(0, 10)
+        while (true) {
+            // 并发许可：排队等待，直到有空闲下载槽位（或任务被暂停/取消）
+            awaitConcurrencySlot()
+            if (!isTaskActive()) return
+            activeDownloads.incrementAndGet()
+            try {
+                try {
+                    runTask(id, headers)
+                    return
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    attempts++
+                    if (isTaskActive() && attempts <= maxRetries) {
+                        Log.d(TAG, "runTaskWithRetry: id=$id 失败，自动重试 $attempts/$maxRetries：${e.message}")
+                        // 逐次递增延迟，避免失败风暴
+                        delay(1200L * attempts)
+                    } else {
+                        throw e
+                    }
+                }
+            } finally {
+                activeDownloads.decrementAndGet()
+            }
+        }
+    }
+
     private suspend fun runTask(id: Long, headers: Map<String, String>) {
         // 协程已被取消（暂停/删除）：直接退出，不写状态
         if (!isTaskActive()) return
@@ -363,6 +417,7 @@ class DownloadManager(
                                     taskId = id, url = task.url, start = start, end = end,
                                     partFile = File(chunkDir, "part_$i"), headers = headers
                                 ) { bytes ->
+                                    speedLimiter.awaitAllow(bytes)
                                     val new = downloaded.addAndGet(bytes)
                                     if (!isTaskActive()) return@downloadChunk
                                     speedRecorder.onBytes(new)?.let { speed ->
@@ -420,6 +475,7 @@ class DownloadManager(
                         taskId = id, url = task.url, start = start, end = end,
                         partFile = partFile, headers = headers
                     ) { bytes ->
+                        speedLimiter.awaitAllow(bytes)
                         val new = downloaded.addAndGet(bytes)
                         if (!isTaskActive()) return@downloadChunk
                         dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
@@ -462,6 +518,7 @@ class DownloadManager(
         val fullFile = File(chunkDir, "full_single.bin").apply { delete() } // 全新整文件，从 0 开始
         val fullDownloaded = AtomicLong(0)
         val ok = downloader.downloadFull(id, task.url, fullFile, headers) { bytes ->
+            speedLimiter.awaitAllow(bytes)
             val new = fullDownloaded.addAndGet(bytes)
             if (!isTaskActive()) return@downloadFull
             dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
@@ -488,6 +545,7 @@ class DownloadManager(
             partFile = partFile,
             headers = headers
         ) { bytes ->
+            speedLimiter.awaitAllow(bytes)
             val new = downloaded.addAndGet(bytes)
             if (!isTaskActive()) return@downloadChunk
             // 大小未知：只更新已下载量（total=0 表示未知）
@@ -504,6 +562,7 @@ class DownloadManager(
                 partFile = partFile,
                 headers = headers
             ) { bytes ->
+                speedLimiter.awaitAllow(bytes)
                 val new = downloaded.addAndGet(bytes)
                 if (!isTaskActive()) return@downloadFull
                 dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, 0)
@@ -522,6 +581,7 @@ class DownloadManager(
         hlsFile.delete()
         val downloaded = AtomicLong(0)
         val ok = HlsDownloader.download(task.url, headers, hlsFile) { bytes ->
+            speedLimiter.awaitAllow(bytes)
             val new = downloaded.addAndGet(bytes)
             dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, 0)
             notifyProgress(task.fileName, new, 0)
@@ -612,6 +672,40 @@ class DownloadManager(
                 return speed
             }
             return null
+        }
+    }
+
+    /** 全局限速器（令牌桶）：所有任务合计不超过 speedLimitProvider 的字节/秒；0 = 不限速 */
+    private inner class SpeedLimiter {
+        @Volatile
+        private var tokens = 0L
+        @Volatile
+        private var lastRefillNanos = System.nanoTime()
+
+        @Synchronized
+        private fun refill(limit: Long) {
+            val now = System.nanoTime()
+            val elapsedSec = ((now - lastRefillNanos).coerceAtLeast(0) / 1_000_000_000.0)
+            lastRefillNanos = now
+            tokens = minOf(limit, tokens + (elapsedSec * limit).toLong())
+        }
+
+        /** 消耗 bytes 字节额度；不足则挂起等待（限速生效） */
+        suspend fun awaitAllow(bytes: Long) {
+            val limit = speedLimitProvider().coerceAtLeast(0L)
+            if (limit <= 0L) return
+            while (true) {
+                val waitMs = synchronized(this) {
+                    refill(limit)
+                    if (bytes <= tokens) {
+                        tokens -= bytes
+                        return
+                    }
+                    ((bytes - tokens) * 1000 / limit).coerceIn(1L, 200L)
+                }
+                // 锁外挂起等待，避免持锁阻塞其他任务
+                delay(waitMs)
+            }
         }
     }
 
