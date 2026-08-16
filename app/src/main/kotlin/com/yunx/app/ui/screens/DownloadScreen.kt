@@ -100,6 +100,7 @@ fun DownloadScreen(
     val stats by viewModel.stats.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<DownloadTaskEntity?>(null) }
+    var showDeleteAllConfirm by remember { mutableStateOf(false) }
 
     // Android 9- 写公共目录需要 WRITE_EXTERNAL_STORAGE
     val needLegacyPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
@@ -120,39 +121,56 @@ fun DownloadScreen(
         if (tasks.isEmpty()) {
             EmptyDownloadState(modifier = Modifier.align(Alignment.Center))
         } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // 根目录任务（无相对路径）单独显示
-                val rootTasks = tasks.filter { !it.fileName.contains('/') }
-                // 文件夹下载任务：按目录路径分组，合并为一个可展开项
-                val folderGroups = tasks.filter { it.fileName.contains('/') }
-                    .groupBy { it.fileName.substringBeforeLast('/') }
+            Column(modifier = Modifier.fillMaxSize()) {
+                // 批量操作栏：全部暂停 / 全部开始 / 删除全部
+                DownloadBatchBar(
+                    hasActive = tasks.any {
+                        it.status == DownloadTaskEntity.STATUS_DOWNLOADING ||
+                            it.status == DownloadTaskEntity.STATUS_PENDING
+                    },
+                    hasResumable = tasks.any {
+                        it.status == DownloadTaskEntity.STATUS_PAUSED ||
+                            it.status == DownloadTaskEntity.STATUS_FAILED
+                    },
+                    onPauseAll = { viewModel.pauseAll() },
+                    onResumeAll = { viewModel.resumeAll() },
+                    onDeleteAll = { showDeleteAllConfirm = true }
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // 根目录任务（无相对路径）单独显示
+                    val rootTasks = tasks.filter { !it.fileName.contains('/') }
+                    // 文件夹下载任务：按目录路径分组，合并为一个可展开项
+                    val folderGroups = tasks.filter { it.fileName.contains('/') }
+                        .groupBy { it.fileName.substringBeforeLast('/') }
 
-                items(rootTasks, key = { it.id }) { task ->
-                    DownloadTaskCard(
-                        task = task,
-                        stats = stats[task.id],
-                        onPause = { viewModel.pause(task.id) },
-                        onResume = { viewModel.resume(task.id) },
-                        onRemove = { pendingDelete = task }
-                    )
-                }
-
-                folderGroups.forEach { (folder, groupTasks) ->
-                    item(key = "folder_$folder") {
-                        FolderDownloadGroup(
-                            folder = folder,
-                            tasks = groupTasks,
-                            stats = stats,
-                            onPause = { viewModel.pause(it) },
-                            onResume = { viewModel.resume(it) },
-                            onRemove = { pendingDelete = it }
+                    items(rootTasks, key = { it.id }) { task ->
+                        DownloadTaskCard(
+                            task = task,
+                            stats = stats[task.id],
+                            onPause = { viewModel.pause(task.id) },
+                            onResume = { viewModel.resume(task.id) },
+                            onRemove = { pendingDelete = task }
                         )
+                    }
+
+                    folderGroups.forEach { (folder, groupTasks) ->
+                        item(key = "folder_$folder") {
+                            FolderDownloadGroup(
+                                folder = folder,
+                                tasks = groupTasks,
+                                stats = stats,
+                                onPause = { viewModel.pause(it) },
+                                onResume = { viewModel.resume(it) },
+                                onRemove = { pendingDelete = it }
+                            )
+                        }
                     }
                 }
             }
@@ -180,6 +198,108 @@ fun DownloadScreen(
                 viewModel.remove(task.id, deleteLocal)
             }
         )
+    }
+
+    // 删除全部任务二次确认（可选同时删除本地文件）
+    if (showDeleteAllConfirm) {
+        var deleteAllLocal by remember { mutableStateOf(false) }
+        val hasCompletedFile = tasks.any {
+            it.status == DownloadTaskEntity.STATUS_COMPLETED && it.savePath.isNotBlank()
+        }
+        AlertDialog(
+            onDismissRequest = { showDeleteAllConfirm = false },
+            title = { Text("删除全部任务") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "确定删除所有下载任务吗？删除后任务记录将被清除，且不可恢复。",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (hasCompletedFile) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = deleteAllLocal,
+                                onCheckedChange = { deleteAllLocal = it }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "同时删除本地文件",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        Text(
+                            text = "勾选后将一并删除所有已下载到 Download 目录的文件，且不可恢复。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteAllConfirm = false
+                        viewModel.removeAll(deleteAllLocal)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("全部删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAllConfirm = false }) { Text("取消") }
+            }
+        )
+    }
+}
+
+/** 批量操作栏：全部暂停 / 全部开始 / 删除全部（Material3 紧凑按钮，无可用操作时禁用） */
+@Composable
+private fun DownloadBatchBar(
+    hasActive: Boolean,
+    hasResumable: Boolean,
+    onPauseAll: () -> Unit,
+    onResumeAll: () -> Unit,
+    onDeleteAll: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(onClick = onPauseAll, enabled = hasActive) {
+            Icon(
+                imageVector = Icons.Outlined.Pause,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("全部暂停")
+        }
+        TextButton(onClick = onResumeAll, enabled = hasResumable) {
+            Icon(
+                imageVector = Icons.Outlined.PlayArrow,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("全部开始")
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        TextButton(onClick = onDeleteAll) {
+            Icon(
+                imageVector = Icons.Outlined.Delete,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.error
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("删除全部", color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 
