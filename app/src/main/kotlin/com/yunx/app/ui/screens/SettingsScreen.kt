@@ -3,6 +3,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,12 +26,15 @@ import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VolunteerActivism
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,8 +52,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.yunx.app.data.backup.AuthBackupManager
+import com.yunx.app.data.backup.AuthCrypto
 import com.yunx.app.data.download.DownloadSaver
 import com.yunx.app.data.prefs.SettingsRepository
 import com.yunx.app.data.update.UpdateChecker
@@ -81,6 +88,11 @@ fun SettingsScreen(
     var showLogDialog by remember { mutableStateOf(false) }
     // 检查更新结果（非空时弹更新对话框）
     var updateRelease by remember { mutableStateOf<UpdateChecker.Release?>(null) }
+    // 网盘认证导出弹窗（AES 加密 + 导出范围）
+    var showExportAuthDialog by remember { mutableStateOf(false) }
+    // 网盘认证导入：加密文件内容（非空时弹解密密码框）
+    var pendingImportContent by remember { mutableStateOf<String?>(null) }
+    var showImportAuthDialog by remember { mutableStateOf(false) }
     // 本地状态：修改后立即刷新 UI，同时同步外部保存值
     var threads by remember { mutableStateOf(downloadThreads) }
     LaunchedEffect(downloadThreads) { threads = downloadThreads }
@@ -101,7 +113,7 @@ fun SettingsScreen(
             SnackbarController.show("下载保存目录已更新")
         }
     }
-    // 导入网盘认证文件选择器
+    // 导入网盘认证文件选择器：选择后先判断是否加密备份，加密则弹密码框
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -114,13 +126,20 @@ fun SettingsScreen(
                     SnackbarController.show("读取文件失败")
                     return@launch
                 }
-                val count = runCatching {
-                    withContext(Dispatchers.IO) { backupManager.importJson(text) }
-                }.getOrElse { e ->
-                    SnackbarController.show("导入失败：${e.message}")
-                    return@launch
+                if (AuthCrypto.isEncrypted(text)) {
+                    // 加密备份：弹解密密码框
+                    pendingImportContent = text
+                    showImportAuthDialog = true
+                } else {
+                    // 明文备份：直接导入
+                    val count = runCatching {
+                        withContext(Dispatchers.IO) { backupManager.importJson(text) }
+                    }.getOrElse { e ->
+                        SnackbarController.show("导入失败：${e.message}")
+                        return@launch
+                    }
+                    SnackbarController.show("已恢复 $count 个平台的认证信息")
                 }
-                SnackbarController.show("已恢复 $count 个平台的认证信息")
             }
         }
     }
@@ -219,30 +238,16 @@ fun SettingsScreen(
         SettingsItem(
             icon = Icons.Outlined.Backup,
             title = "导出网盘认证",
-            description = "打包已登录的网盘认证信息为 JSON 文件（下载目录）",
-            onClick = {
-                scope.launch {
-                    val json = runCatching {
-                        withContext(Dispatchers.IO) { backupManager.exportJson() }
-                    }.getOrNull()
-                    if (json == null) {
-                        SnackbarController.show("导出失败")
-                        return@launch
-                    }
-                    val saved = withContext(Dispatchers.IO) {
-                        backupManager.saveToDownloads(context, json)
-                    }
-                    SnackbarController.show(if (saved) "已导出到下载目录" else "导出失败")
-                }
-            }
+            description = "AES 加密导出网盘 Token（可选密码），保护账号安全",
+            onClick = { showExportAuthDialog = true }
         )
 
         Spacer(modifier = Modifier.height(8.dp))
         SettingsItem(
             icon = Icons.Outlined.Restore,
             title = "导入网盘认证",
-            description = "从 JSON 文件恢复网盘认证信息",
-            onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) }
+            description = "选择加密或明文的认证备份文件，恢复网盘登录",
+            onClick = { importLauncher.launch(arrayOf("application/json", "application/octet-stream", "*/*")) }
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -407,6 +412,170 @@ fun SettingsScreen(
             }
         )
     }
+
+    // 导出网盘认证弹窗（AES 加密密码 + 导出范围）
+    if (showExportAuthDialog) {
+        ExportAuthDialog(
+            onDismiss = { showExportAuthDialog = false },
+            onConfirm = { password, onlyLoggedIn ->
+                showExportAuthDialog = false
+                scope.launch {
+                    val content = runCatching {
+                        withContext(Dispatchers.IO) { backupManager.export(password, onlyLoggedIn) }
+                    }.getOrNull()
+                    if (content == null) {
+                        SnackbarController.show("导出失败")
+                        return@launch
+                    }
+                    val encrypted = password.isNotBlank()
+                    val saved = withContext(Dispatchers.IO) {
+                        backupManager.saveToDownloads(context, content, encrypted)
+                    }
+                    SnackbarController.show(
+                        if (saved) {
+                            if (encrypted) "已加密导出到下载目录" else "已导出到下载目录"
+                        } else {
+                            "导出失败"
+                        }
+                    )
+                }
+            }
+        )
+    }
+
+    // 导入加密备份弹窗（解密密码）
+    if (showImportAuthDialog) {
+        ImportAuthDialog(
+            onDismiss = {
+                showImportAuthDialog = false
+                pendingImportContent = null
+            },
+            onConfirm = { password ->
+                showImportAuthDialog = false
+                val content = pendingImportContent
+                pendingImportContent = null
+                if (content != null) {
+                    scope.launch {
+                        val count = try {
+                            withContext(Dispatchers.IO) { backupManager.import(content, password) }
+                        } catch (e: javax.crypto.AEADBadTagException) {
+                            SnackbarController.show("密码错误，解密失败")
+                            return@launch
+                        } catch (e: Exception) {
+                            SnackbarController.show("导入失败：${e.message}")
+                            return@launch
+                        }
+                        SnackbarController.show("已恢复 $count 个平台的认证信息")
+                    }
+                }
+            }
+        )
+    }
+}
+
+/** 导出网盘认证弹窗：AES 加密密码（可留空）+ 导出范围（仅已登录 / 全部绑定） */
+@Composable
+private fun ExportAuthDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (password: String, onlyLoggedIn: Boolean) -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var onlyLoggedIn by remember { mutableStateOf(true) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("导出网盘认证") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "设置密码对认证文件进行 AES 加密（建议设置；留空则导出明文）。密码请务必牢记，丢失无法找回。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("加密密码（可留空）") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true
+                )
+                Text(
+                    text = "导出范围",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = onlyLoggedIn,
+                        onClick = { onlyLoggedIn = true }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("仅导出当前已登录的网盘", style = MaterialTheme.typography.bodyMedium)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = !onlyLoggedIn,
+                        onClick = { onlyLoggedIn = false }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("导出全部绑定的网盘", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(password, onlyLoggedIn) }) { Text("导出") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+/** 导入加密备份弹窗：输入解密密码 */
+@Composable
+private fun ImportAuthDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (password: String) -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("导入网盘认证") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "该备份文件已加密，请输入导出时设置的密码进行解密。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("解密密码") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(password) },
+                enabled = password.isNotBlank()
+            ) { Text("解密并导入") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @Composable

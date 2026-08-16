@@ -46,11 +46,23 @@ class AuthBackupManager(
         const val VERSION = 1
     }
 
+    /**
+     * 导出网盘认证（可选 AES 加密）：
+     * @param password 非空则用该密码 AES-GCM 加密；null/空则导出明文 JSON
+     * @param onlyLoggedIn true=仅导出凭证可用的已登录平台；false=导出数据库里全部绑定记录
+     * @return 明文 JSON 或 Base64 密文
+     */
+    suspend fun export(password: String? = null, onlyLoggedIn: Boolean = true): String =
+        withContext(Dispatchers.IO) {
+            val json = exportJson(onlyLoggedIn)
+            if (password.isNullOrBlank()) json else AuthCrypto.encrypt(json, password)
+        }
+
     /** 导出所有已登录平台为 JSON 字符串；无已登录平台时返回空 accounts */
-    suspend fun exportJson(): String = withContext(Dispatchers.IO) {
+    suspend fun exportJson(onlyLoggedIn: Boolean = true): String = withContext(Dispatchers.IO) {
         val accounts = JSONArray()
         quarkDao.getAccount()?.let { a ->
-            if (a.cookie.isNotBlank()) accounts.put(
+            if (!onlyLoggedIn || a.cookie.isNotBlank()) accounts.put(
                 JSONObject()
                     .put("platform", "quark")
                     .put("cookie", a.cookie)
@@ -59,7 +71,7 @@ class AuthBackupManager(
             )
         }
         ucDao.getAccount()?.let { a ->
-            if (a.cookie.isNotBlank()) accounts.put(
+            if (!onlyLoggedIn || a.cookie.isNotBlank()) accounts.put(
                 JSONObject()
                     .put("platform", "uc")
                     .put("cookie", a.cookie)
@@ -68,7 +80,7 @@ class AuthBackupManager(
             )
         }
         xunleiDao.getAccount()?.let { a ->
-            if (a.accessToken.isNotBlank()) accounts.put(
+            if (!onlyLoggedIn || a.accessToken.isNotBlank()) accounts.put(
                 JSONObject()
                     .put("platform", "xunlei")
                     .put("accessToken", a.accessToken)
@@ -80,7 +92,7 @@ class AuthBackupManager(
             )
         }
         baiduDao.getAccount()?.let { a ->
-            if (a.cookie.isNotBlank()) accounts.put(
+            if (!onlyLoggedIn || a.cookie.isNotBlank()) accounts.put(
                 JSONObject()
                     .put("platform", "baidu")
                     .put("cookie", a.cookie)
@@ -89,7 +101,7 @@ class AuthBackupManager(
             )
         }
         c139Dao.getAccount()?.let { a ->
-            if (a.cookie.isNotBlank()) accounts.put(
+            if (!onlyLoggedIn || a.cookie.isNotBlank()) accounts.put(
                 JSONObject()
                     .put("platform", "c139")
                     .put("cookie", a.cookie)
@@ -99,7 +111,7 @@ class AuthBackupManager(
             )
         }
         pan123Dao.getAccount()?.let { a ->
-            if (a.accessToken.isNotBlank()) accounts.put(
+            if (!onlyLoggedIn || a.accessToken.isNotBlank()) accounts.put(
                 JSONObject()
                     .put("platform", "pan123")
                     .put("accessToken", a.accessToken)
@@ -114,6 +126,16 @@ class AuthBackupManager(
             .put("exportedAt", System.currentTimeMillis())
             .put("accounts", accounts)
             .toString(2)
+    }
+
+    /**
+     * 导入认证内容（可选 AES 解密）：
+     * @param password 非空时先解密（密码错误抛异常）；null/空按明文 JSON 解析
+     * @return 成功恢复的平台数；文件不合法抛异常
+     */
+    suspend fun import(content: String, password: String? = null): Int = withContext(Dispatchers.IO) {
+        val json = if (password.isNullOrBlank()) content else AuthCrypto.decrypt(content, password)
+        importJson(json)
     }
 
     /** 导入 JSON，恢复各平台凭证；返回成功恢复的平台数；文件不合法抛异常 */
@@ -209,15 +231,25 @@ class AuthBackupManager(
         count
     }
 
-    /** 把 JSON 保存到公共下载目录（yunx_auth_backup_时间戳.json）；Android 10+ 走 MediaStore 无需权限 */
-    suspend fun saveToDownloads(context: Context, content: String): Boolean =
+    /**
+     * 把备份内容保存到公共下载目录（Android 10+ 走 MediaStore 无需权限）。
+     * @param encrypted true 时文件名为 .yunx（加密备份），否则 .json（明文）
+     */
+    suspend fun saveToDownloads(context: Context, content: String, encrypted: Boolean = false): Boolean =
         withContext(Dispatchers.IO) {
             runCatching {
-                val fileName = "yunx_auth_backup_${timestamp()}.json"
+                val fileName = if (encrypted) {
+                    "yunx_auth_backup_${timestamp()}.yunx"
+                } else {
+                    "yunx_auth_backup_${timestamp()}.json"
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val values = ContentValues().apply {
                         put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                        put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                        put(
+                            MediaStore.Downloads.MIME_TYPE,
+                            if (encrypted) "application/octet-stream" else "application/json"
+                        )
                         put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                     }
                     val uri: Uri = context.contentResolver
