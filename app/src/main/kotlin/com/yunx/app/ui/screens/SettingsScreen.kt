@@ -1,6 +1,9 @@
 package com.yunx.app.ui.screens
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -22,7 +25,9 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Power
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Speed
@@ -39,6 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarScrollBehavior
@@ -111,6 +117,10 @@ fun SettingsScreen(
     var showConcurrencyDialog by remember { mutableStateOf(false) }
     var showSpeedDialog by remember { mutableStateOf(false) }
     var showRetryDialog by remember { mutableStateOf(false) }
+    // 用户体验与系统适配：锁屏保持下载 / 通知栏速度
+    var keepLocked by remember { mutableStateOf(settingsRepo.keepDownloadWhenLocked) }
+    var showSpeed by remember { mutableStateOf(settingsRepo.notificationShowSpeed) }
+    var showBatteryDialog by remember { mutableStateOf(false) }
     val dirLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -227,6 +237,39 @@ fun SettingsScreen(
             title = "失败自动重试",
             description = if (retryCount == 0) "失败后不自动重试" else "失败后自动重试 $retryCount 次（断点续传）",
             onClick = { showRetryDialog = true }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 用户体验与系统适配：锁屏保持下载 / 通知栏进度样式
+        SettingsItem(
+            icon = Icons.Outlined.Power,
+            title = "锁屏后保持下载",
+            description = "开启后下载时获取 WakeLock 维持网络，并可加入「忽略电池优化」白名单",
+            onClick = {
+                keepLocked = !keepLocked
+                settingsRepo.keepDownloadWhenLocked = keepLocked
+                if (keepLocked) {
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    if (pm?.isIgnoringBatteryOptimizations(context.packageName) != true) {
+                        showBatteryDialog = true
+                    }
+                }
+            },
+            trailing = { Switch(checked = keepLocked, onCheckedChange = null) }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SettingsItem(
+            icon = Icons.Outlined.Notifications,
+            title = "通知栏下载进度",
+            description = if (showSpeed) "完整通知：进度条 + 下载速度" else "仅显示通知（隐藏下载速度）",
+            onClick = {
+                showSpeed = !showSpeed
+                settingsRepo.notificationShowSpeed = showSpeed
+            },
+            trailing = { Switch(checked = showSpeed, onCheckedChange = null) }
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -546,8 +589,21 @@ fun SettingsScreen(
     // 下载速度限制：预设档位 + 自定义（KB/s）
     if (showSpeedDialog) {
         val presets = listOf(0L, 1L * 1024 * 1024, 2L * 1024 * 1024, 5L * 1024 * 1024, 10L * 1024 * 1024)
-        var customKb by remember { mutableStateOf("") }
-        val isCustom = speedLimitBps > 0 && speedLimitBps !in presets
+        // 弹窗内临时选择（不立即写设置）：null=未操作，-1=自定义，其余=预设值
+        var tempSelected by remember { mutableStateOf<Long?>(null) }
+        // 自定义输入：打开时若当前是自定义档位，带出原值（重新打开保留）
+        var customKb by remember {
+            mutableStateOf(
+                if (speedLimitBps > 0 && speedLimitBps !in presets) (speedLimitBps / 1024).toString() else ""
+            )
+        }
+        val effective = tempSelected ?: speedLimitBps
+        // 自定义选中态：显式识别「-1=自定义」哨兵；未操作时按当前值是否为自定义档位判断
+        val isCustom = when {
+            tempSelected == -1L -> true
+            tempSelected == null -> speedLimitBps > 0 && speedLimitBps !in presets
+            else -> false
+        }
         AlertDialog(
             onDismissRequest = { showSpeedDialog = false },
             title = { Text("下载速度限制") },
@@ -559,11 +615,8 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = !isCustom && speedLimitBps == v,
-                                onClick = {
-                                    speedLimitBps = v
-                                    settingsRepo.downloadSpeedLimit = v
-                                }
+                                selected = !isCustom && effective == v,
+                                onClick = { tempSelected = v }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
@@ -572,7 +625,7 @@ fun SettingsScreen(
                             )
                         }
                     }
-                    // 自定义档位
+                    // 自定义档位：点击单选即可选中（进入自定义模式）
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -580,8 +633,9 @@ fun SettingsScreen(
                         RadioButton(
                             selected = isCustom,
                             onClick = {
-                                // 选中自定义：聚焦输入框（保留当前值换算）
-                                if (speedLimitBps > 0 && speedLimitBps !in presets) {
+                                tempSelected = -1L
+                                // 当前已是自定义值时带出原值，便于修改
+                                if (speedLimitBps > 0 && speedLimitBps !in presets && customKb.isBlank()) {
                                     customKb = (speedLimitBps / 1024).toString()
                                 }
                             }
@@ -589,7 +643,11 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         OutlinedTextField(
                             value = customKb,
-                            onValueChange = { customKb = it.filter(Char::isDigit).take(6) },
+                            onValueChange = {
+                                customKb = it.filter(Char::isDigit).take(6)
+                                // 输入即视为选择自定义
+                                tempSelected = -1L
+                            },
                             modifier = Modifier.weight(1f),
                             label = { Text("自定义 KB/s") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -601,12 +659,20 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        // 自定义输入非空时按自定义生效
-                        val kb = customKb.toLongOrNull()?.coerceAtLeast(1L)
-                        if (kb != null) {
-                            speedLimitBps = kb * 1024
-                            settingsRepo.downloadSpeedLimit = kb * 1024
+                        // 以当前选中项为准：选自定义则应用输入；选预设则应用预设值
+                        if (isCustom) {
+                            val kb = customKb.toLongOrNull()?.coerceAtLeast(1L)
+                            if (kb != null) {
+                                speedLimitBps = kb * 1024
+                                settingsRepo.downloadSpeedLimit = kb * 1024
+                            }
+                            // 自定义输入为空：保持原值
+                        } else if (tempSelected != null) {
+                            val v = tempSelected ?: speedLimitBps
+                            speedLimitBps = v
+                            settingsRepo.downloadSpeedLimit = v
                         }
+                        // 未做任何选择：保持当前值
                         showSpeedDialog = false
                     }
                 ) { Text("确定") }
@@ -649,6 +715,38 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showRetryDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // 锁屏保持下载：引导加入「忽略电池优化」白名单
+    if (showBatteryDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatteryDialog = false },
+            title = { Text("保持后台下载") },
+            text = {
+                Text(
+                    text = "为确保障屏后下载不中断，建议将云析加入「忽略电池优化」白名单。是否前往系统设置？",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showBatteryDialog = false
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    Uri.parse("package:${context.packageName}")
+                                )
+                            )
+                        }
+                    }
+                ) { Text("前往设置") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatteryDialog = false }) { Text("暂不") }
             }
         )
     }

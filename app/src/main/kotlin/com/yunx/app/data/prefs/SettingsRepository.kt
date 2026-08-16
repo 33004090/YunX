@@ -45,6 +45,20 @@ class SettingsRepository(context: Context) {
             prefs.edit().putInt("download_retry_count", value.coerceIn(0, 10)).apply()
         }
 
+    /** 锁屏后保持下载：开启后下载时获取 WakeLock，并可引导加入「忽略电池优化」白名单（默认开启） */
+    var keepDownloadWhenLocked: Boolean
+        get() = prefs.getBoolean("keep_download_when_locked", true)
+        set(value) {
+            prefs.edit().putBoolean("keep_download_when_locked", value).apply()
+        }
+
+    /** 通知栏进度样式：true=完整通知（进度条+下载速度）；false=仅显示通知（隐藏速度） */
+    var notificationShowSpeed: Boolean
+        get() = prefs.getBoolean("notification_show_speed", true)
+        set(value) {
+            prefs.edit().putBoolean("notification_show_speed", value).apply()
+        }
+
     /** 百度网盘大文件限速提示：是否已选择「不再显示」 */
     var baiduLimitHintDismissed: Boolean
         get() = prefs.getBoolean("baidu_limit_hint_dismissed", false)

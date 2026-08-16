@@ -242,7 +242,10 @@ fun MainScreen() {
             // 网络与下载策略（设置页可调，动态生效）：并发任务数 / 全局限速 / 失败重试
             concurrencyProvider = { settings.maxConcurrentDownloads },
             speedLimitProvider = { settings.downloadSpeedLimit },
-            retryCountProvider = { settings.downloadRetryCount }
+            retryCountProvider = { settings.downloadRetryCount },
+            // 锁屏保持下载 / 通知栏速度开关
+            keepWhenLockedProvider = { settings.keepDownloadWhenLocked },
+            showSpeedProvider = { settings.notificationShowSpeed }
         )
     }
     // Android 9- 写公共 Download 需要 WRITE_EXTERNAL_STORAGE 运行时授权：

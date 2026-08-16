@@ -72,7 +72,11 @@ class DownloadManager(
     /** 全局下载速度限制提供者（字节/秒；0 = 不限速） */
     private val speedLimitProvider: () -> Long = { 0L },
     /** 下载失败后自动重试次数提供者（默认 3，上限 10） */
-    private val retryCountProvider: () -> Int = { 3 }
+    private val retryCountProvider: () -> Int = { 3 },
+    /** 锁屏后保持下载开关（开启时获取 WakeLock 维持 Wi-Fi/CPU） */
+    private val keepWhenLockedProvider: () -> Boolean = { true },
+    /** 通知栏显示下载速度开关（false 时仅显示通知，隐藏速度） */
+    private val showSpeedProvider: () -> Boolean = { true }
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -103,14 +107,28 @@ class DownloadManager(
     private val notifyThrottleMs = 2000L
     private val lastNotifyTs = AtomicLong(0)
 
-    /** 更新前台通知进度（2 秒节流；total<=0 时不确定进度，只更新标题） */
-    private fun notifyProgress(fileName: String, new: Long, total: Long) {
+    /** 更新前台通知进度（2 秒节流；total<=0 时不确定进度，只更新标题；可显示下载速度） */
+    private fun notifyProgress(id: Long, fileName: String, new: Long, total: Long) {
         val now = System.currentTimeMillis()
         if (now - lastNotifyTs.get() >= notifyThrottleMs) {
             lastNotifyTs.set(now)
             val percent = if (total > 0) ((new * 100 / total).toInt().coerceIn(0, 100)) else -1
-            DownloadService.update(context, fileName, percent)
+            val speed = _stats.value[id]?.speed ?: 0L
+            val speedText = if (speed > 0) formatSpeed(speed) else ""
+            DownloadService.update(context, fileName, percent, speedText, showSpeedProvider())
         }
+    }
+
+    private fun formatSpeed(bytesPerSec: Long): String {
+        if (bytesPerSec <= 0) return ""
+        val units = arrayOf("B/s", "KB/s", "MB/s", "GB/s")
+        var value = bytesPerSec.toDouble()
+        var i = 0
+        while (value >= 1024 && i < units.size - 1) {
+            value /= 1024
+            i++
+        }
+        return String.format("%.1f %s", value, units[i])
     }
 
     /** 每个任务一把互斥锁：暂停后立即恢复时避免新旧协程并发写分片 */
@@ -227,13 +245,36 @@ class DownloadManager(
             val name = runCatching { dao.get(id)?.fileName }.getOrNull() ?: "下载任务"
             DownloadService.start(context, name)
         }
+        // 锁屏保持下载：开启时获取 PARTIAL_WAKE_LOCK（息屏维持 CPU/网络）
+        acquireWakeLockIfNeeded()
     }
 
     private fun onTaskFinished() {
         if (activeTaskCount.decrementAndGet() <= 0) {
             activeTaskCount.set(0)
             DownloadService.stop(context)
+            releaseWakeLock()
         }
+    }
+
+    // ---------- 锁屏保持下载（WakeLock） ----------
+
+    @Volatile
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    private fun acquireWakeLockIfNeeded() {
+        if (!keepWhenLockedProvider()) return
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager ?: return
+        if (wakeLock == null) {
+            wakeLock = pm.newWakeLock(
+                android.os.PowerManager.PARTIAL_WAKE_LOCK, "yunx:download"
+            ).apply { setReferenceCounted(false) }
+        }
+        wakeLock?.let { if (!it.isHeld) it.acquire() }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) it.release() }
     }
 
     /** 暂停下载（保留 part 文件与请求头） */
@@ -424,7 +465,7 @@ class DownloadManager(
                                         val remain = if (speed > 0) (total - new) * 1000 / speed else -1L
                                         _stats.update { it + (id to DownloadStats(speed, remain, effectiveWorkers)) }
                                     }
-                                    notifyProgress(task.fileName, new, total)
+                                    notifyProgress(id, task.fileName, new, total)
                                     val last = lastUpdate.get()
                                     if (new - last >= progressThrottle || new >= total) {
                                         if (lastUpdate.compareAndSet(last, new)) {
@@ -479,7 +520,7 @@ class DownloadManager(
                         val new = downloaded.addAndGet(bytes)
                         if (!isTaskActive()) return@downloadChunk
                         dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
-                        notifyProgress(task.fileName, new, total)
+                        notifyProgress(id, task.fileName, new, total)
                     }
                     if (ok != ChunkResult.OK) failReason.compareAndSet(null, "分片 ${i + 1}/$chunkCount 重试仍失败")
                     ok == ChunkResult.OK
@@ -522,7 +563,7 @@ class DownloadManager(
             val new = fullDownloaded.addAndGet(bytes)
             if (!isTaskActive()) return@downloadFull
             dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, total)
-            notifyProgress(task.fileName, new, total)
+            notifyProgress(id, task.fileName, new, total)
         }
         if (!ok) throw IllegalStateException(failReason.get() ?: "分片与单流下载均失败")
         finishDownload(id, chunkDir, listOf(fullFile), task.fileName, total)
@@ -551,7 +592,7 @@ class DownloadManager(
             // 大小未知：只更新已下载量（total=0 表示未知）
             dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, 0)
             // 前台通知进度（2 秒节流，total 未知时仅更新标题）
-            notifyProgress(task.fileName, new, 0)
+            notifyProgress(id, task.fileName, new, 0)
         }
         if (ok != ChunkResult.OK) {
             // Range 被 CDN 拒绝（416/403）或忽略（200 整文件）：回退为无 Range 完整 GET
@@ -584,7 +625,7 @@ class DownloadManager(
             speedLimiter.awaitAllow(bytes)
             val new = downloaded.addAndGet(bytes)
             dao.updateProgress(id, DownloadTaskEntity.STATUS_DOWNLOADING, new, 0)
-            notifyProgress(task.fileName, new, 0)
+            notifyProgress(id, task.fileName, new, 0)
         }
         if (!isTaskActive()) return
         if (!ok) {

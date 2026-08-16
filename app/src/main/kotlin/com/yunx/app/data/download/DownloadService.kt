@@ -29,7 +29,9 @@ class DownloadService : Service() {
             else -> {
                 val title = intent?.getStringExtra(EXTRA_TITLE) ?: "下载中…"
                 val progress = intent?.getIntExtra(EXTRA_PROGRESS, -1) ?: -1
-                startAsForeground(title, progress)
+                val speed = intent?.getStringExtra(EXTRA_SPEED) ?: ""
+                val showSpeed = intent?.getBooleanExtra(EXTRA_SHOW_SPEED, true) ?: true
+                startAsForeground(title, progress, speed, showSpeed)
             }
         }
         return START_NOT_STICKY
@@ -45,9 +47,9 @@ class DownloadService : Service() {
         super.onDestroy()
     }
 
-    private fun startAsForeground(title: String, progress: Int) {
+    private fun startAsForeground(title: String, progress: Int, speed: String, showSpeed: Boolean) {
         ensureChannel()
-        val notification = buildNotification(title, progress)
+        val notification = buildNotification(title, progress, speed, showSpeed)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
@@ -66,7 +68,7 @@ class DownloadService : Service() {
         }
     }
 
-    private fun buildNotification(title: String, progress: Int): Notification {
+    private fun buildNotification(title: String, progress: Int, speed: String, showSpeed: Boolean): Notification {
         val contentIntent = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
@@ -79,11 +81,16 @@ class DownloadService : Service() {
         builder
             .setSmallIcon(R.drawable.icon)
             .setContentTitle(title)
-            .setContentText("正在后台下载，完成前请勿关闭应用")
+            // 完整通知显示下载速度；简化模式仅提示下载中（且不显示进度条）
+            .setContentText(
+                if (showSpeed && speed.isNotBlank()) "下载速度 $speed"
+                else "正在后台下载，完成前请勿关闭应用"
+            )
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-        if (progress in 0..100) {
+        // 仅「完整通知」模式显示进度条；简化模式隐藏进度条
+        if (showSpeed && progress in 0..100) {
             builder.setProgress(100, progress, false)
         }
         return builder.build()
@@ -95,22 +102,30 @@ class DownloadService : Service() {
         private const val ACTION_STOP = "com.yunx.app.action.STOP_DOWNLOAD"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_PROGRESS = "progress"
+        private const val EXTRA_SPEED = "speed"
+        private const val EXTRA_SHOW_SPEED = "show_speed"
 
         /** 下载任务开始时调用（服务不存在则创建前台服务） */
         fun start(context: Context, title: String, progress: Int = 0) {
+            start(context, title, progress, "", true)
+        }
+
+        /** 更新/启动前台通知（标题/进度/速度变化；调用方节流） */
+        fun update(context: Context, title: String, progress: Int, speed: String, showSpeed: Boolean) {
+            start(context, title, progress, speed, showSpeed)
+        }
+
+        private fun start(context: Context, title: String, progress: Int, speed: String, showSpeed: Boolean) {
             val intent = Intent(context, DownloadService::class.java)
                 .putExtra(EXTRA_TITLE, title)
                 .putExtra(EXTRA_PROGRESS, progress)
+                .putExtra(EXTRA_SPEED, speed)
+                .putExtra(EXTRA_SHOW_SPEED, showSpeed)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
             }
-        }
-
-        /** 更新前台通知（标题/进度变化；调用方节流） */
-        fun update(context: Context, title: String, progress: Int) {
-            start(context, title, progress)
         }
 
         /** 全部任务结束：停止前台服务（stopService 无后台启动限制，安全） */
