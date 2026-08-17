@@ -67,11 +67,14 @@ object DownloadSaver {
         val resolver = context.contentResolver
         val treeUri = android.net.Uri.parse(treeUriString)
         return runCatching {
+            // tree URI 不能直接作为 createDocument 的父目录（Android 10 抛 Invalid URI）：
+            // 先取根文档 id，构建根 document URI 作为初始目录
+            val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
+            var dirUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootDocId)
             // 定位（或创建）目标目录：相对路径逐级解析
-            var dirUri = treeUri
             if (subDir.isNotBlank()) {
                 for (part in subDir.split('/').filter { it.isNotBlank() }) {
-                    dirUri = getOrCreateSafDir(resolver, dirUri, part) ?: return@runCatching null
+                    dirUri = getOrCreateSafDir(resolver, treeUri, dirUri, part) ?: return@runCatching null
                 }
             }
             // 候选：原名 → 时间戳防重名
@@ -100,16 +103,20 @@ object DownloadSaver {
         }.getOrNull()
     }
 
-    /** 在父文档树下查找/创建指定名称的子目录，返回其文档 uri */
+    /**
+     * 在父文档树下查找/创建指定名称的子目录，返回其文档 uri。
+     * @param treeUri 原始 tree Uri（供 buildChildDocumentsUriUsingTree / buildDocumentUriUsingTree 使用）
+     * @param parentDocUri 当前父目录的 document Uri（供 createDocument 使用）
+     */
     private fun getOrCreateSafDir(
         resolver: ContentResolver,
-        parentUri: android.net.Uri,
+        treeUri: android.net.Uri,
+        parentDocUri: android.net.Uri,
         name: String
     ): android.net.Uri? {
-        // 先查已存在的子目录
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
-            parentUri, DocumentsContract.getTreeDocumentId(parentUri)
-        )
+        // 先查已存在的子目录：children 查询基于 tree Uri + 父目录文档 id
+        val parentDocId = DocumentsContract.getDocumentId(parentDocUri)
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
         resolver.query(
             childrenUri,
             arrayOf(
@@ -124,13 +131,13 @@ object DownloadSaver {
                 val display = cursor.getString(1)
                 val mime = cursor.getString(2)
                 if (display == name && mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                    return DocumentsContract.buildDocumentUriUsingTree(parentUri, id)
+                    return DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
                 }
             }
         }
-        // 不存在则创建
+        // 不存在则创建（父目录必须是 document Uri）
         return DocumentsContract.createDocument(
-            resolver, parentUri, DocumentsContract.Document.MIME_TYPE_DIR, name
+            resolver, parentDocUri, DocumentsContract.Document.MIME_TYPE_DIR, name
         )
     }
 
@@ -255,17 +262,83 @@ object DownloadSaver {
 
     /**
      * 删除已保存的本地文件（配合任务删除）。
-     * @param savePath 保存时返回的 MediaStore uri 字符串或文件绝对路径
+     * @param savePath 保存时返回的 MediaStore uri 字符串 / SAF 文档 uri / 文件绝对路径
+     * @return 是否删除成功（false 表示未找到或删除失败）
      */
-    fun delete(context: Context, savePath: String) {
-        if (savePath.isBlank()) return
-        runCatching {
+    fun delete(context: Context, savePath: String): Boolean {
+        if (savePath.isBlank()) return false
+        return runCatching {
             if (savePath.startsWith("content://")) {
-                context.contentResolver.delete(android.net.Uri.parse(savePath), null, null)
+                val uri = android.net.Uri.parse(savePath)
+                if (DocumentsContract.isDocumentUri(context, uri)) {
+                    deleteSafDocument(context, uri)
+                } else {
+                    context.contentResolver.delete(uri, null, null) > 0
+                }
             } else {
                 File(savePath).delete()
             }
+        }.onFailure {
+            Log.e(TAG, "删除本地文件失败: ${it.message}")
+        }.getOrDefault(false)
+    }
+
+    /**
+     * SAF 文档删除：多级 fallback，兼容国产 ROM 对 tree 授权子文档删除的权限/实现差异。
+     * ① resolver.delete（标准） → ② deleteDocument（重试） → ③ 还原 tree Uri 逐级查找删除。
+     */
+    private fun deleteSafDocument(context: Context, docUri: android.net.Uri): Boolean {
+        // ① 标准删除
+        if (runCatching { context.contentResolver.delete(docUri, null, null) > 0 }.getOrDefault(false)) {
+            return true
         }
+        // ② DocumentsContract.deleteDocument 重试
+        if (runCatching { DocumentsContract.deleteDocument(context.contentResolver, docUri) }.getOrDefault(false)) {
+            return true
+        }
+        // ③ 还原 tree Uri（持久授权域），沿相对路径逐级 findFile 后删除
+        return runCatching {
+            val segments = docUri.pathSegments
+            val treeIdx = segments.indexOf("tree")
+            if (treeIdx < 0 || segments.size < treeIdx + 2) return@runCatching false
+            // docUri: /tree/{treeId}/document/{fileDocId} → treeUri: /tree/{treeId}
+            val treeUri = docUri.buildUpon().path("/" + segments.subList(0, treeIdx + 2).joinToString("/")).build()
+            val treeDocId = android.net.Uri.decode(segments[treeIdx + 1])
+            val fileDocId = DocumentsContract.getDocumentId(docUri)
+            if (!fileDocId.startsWith(treeDocId)) return@runCatching false
+            val relParts = fileDocId.removePrefix(treeDocId).trimStart('/').split('/').filter { it.isNotBlank() }
+            if (relParts.isEmpty()) return@runCatching false
+            val resolver = context.contentResolver
+            var parentDocId = treeDocId
+            for ((i, part) in relParts.withIndex()) {
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+                var foundId: String? = null
+                resolver.query(
+                    childrenUri,
+                    arrayOf(
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                    ),
+                    null, null, null
+                )?.use { c ->
+                    while (c.moveToNext()) {
+                        if (c.getString(1) == part) {
+                            foundId = c.getString(0)
+                            break
+                        }
+                    }
+                } ?: return@runCatching false
+                val id = foundId ?: return@runCatching false
+                if (i == relParts.lastIndex) {
+                    // 最后一层即目标文件：基于 tree 构造文档 uri 删除
+                    val target = DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
+                    return@runCatching runCatching { resolver.delete(target, null, null) > 0 }
+                        .getOrElse { DocumentsContract.deleteDocument(resolver, target) }
+                }
+                parentDocId = id
+            }
+            false
+        }.getOrDefault(false)
     }
 
     private fun mimeOf(fileName: String): String {

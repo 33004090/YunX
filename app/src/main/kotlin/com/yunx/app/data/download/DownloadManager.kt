@@ -316,7 +316,10 @@ class DownloadManager(
                 deferred.await().cancelAndJoin()
             }
             if (deleteLocal) {
-                dao.get(id)?.savePath?.let { DownloadSaver.delete(context, it) }
+                dao.get(id)?.savePath?.let {
+                    val deleted = DownloadSaver.delete(context, it)
+                    Log.d(TAG, "remove: id=$id 删除本地文件 ${if (deleted) "成功" else "失败/未找到"} ($it)")
+                }
             }
             dao.delete(id)
             chunkDirOf(id).deleteRecursively()
