@@ -103,7 +103,6 @@ class ChunkDownloader(private val client: OkHttpClient) {
         headers: Map<String, String>,
         onBytes: suspend (Long) -> Unit
     ): ChunkResult = withContext(Dispatchers.IO) {
-        var lastWasRangeIgnored = false
         val attempts = CHUNK_RETRIES + RANGE_RETRIES
         repeat(attempts) { attempt ->
             if (!isActive) throw CancellationException("下载被取消")
@@ -128,18 +127,16 @@ class ChunkDownloader(private val client: OkHttpClient) {
                 ChunkResult.OK -> return@withContext ChunkResult.OK
                 ChunkResult.FAILED -> return@withContext ChunkResult.FAILED
                 ChunkResult.RANGE_IGNORED -> {
-                    lastWasRangeIgnored = true
-                    // 指数退避后重发 Range（不要下载整文件）：400ms → 800ms → 1600ms → 2000ms(封顶)
-                    val backoff = (400L * (1 shl attempt)).coerceAtMost(2000L)
-                    delay(backoff)
+                    // ★ 不再在片内指数退避：退避期间占着信号量配额，所有分片周期性集体停顿 = "900KB 忽快忽慢"根源。
+                    //   立即返回，由上层释放配额并领新片；只有「持续 RANGE_IGNORED」才由上层回退单流。
+                    return@withContext ChunkResult.RANGE_IGNORED
                 }
                 null -> {
                     if (attempt < attempts - 1) delay((500L * (attempt + 1)).coerceAtMost(3000))
                 }
             }
         }
-        // 重试耗尽：若最后是「忽略 Range」则返回 RANGE_IGNORED 让上层回退单流，否则失败
-        if (lastWasRangeIgnored) ChunkResult.RANGE_IGNORED else ChunkResult.FAILED
+        ChunkResult.FAILED
     }
 
     /** 单次分片请求（不重试）：成功/忽略Range/失败 三态；IO 异常向外抛出 */
@@ -184,10 +181,34 @@ class ChunkDownloader(private val client: OkHttpClient) {
                         ChunkResult.OK
                     }
                     200 -> {
-                        // ★ 服务器忽略 Range，回送整文件：绝不为单分片下载整文件！
-                        //   立即丢弃响应，交由上层回退单条整文件流（只下一次）。
-                        Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end 服务器忽略Range返回200整文件 → 触发回退单流")
-                        ChunkResult.RANGE_IGNORED
+                        // unknownTotal（流式降级，end=MAX）：200 一律视为忽略 Range，由上层回退完整 GET
+                        if (unknownTotal) {
+                            Log.w(TAG, "downloadChunk: task=$taskId 流式下载服务器返回200 → 回退完整GET")
+                            ChunkResult.RANGE_IGNORED
+                        } else {
+                            // ★ 200 可能有两种：① 服务器不支持 Range（回整文件）；② CDN 偶发降级（返回 200，
+                            //   但 Content-Length 与整文件不符，常见于多连接被限流的中间态）。
+                            //   必须校验：Content-Length 缺失或 ≥ 原始区间总长度 → 视为真整文件（RANGE_IGNORED）；
+                            //   否则当 206 处理（writeSlice 按 expected 严格截断，只读本区间字节，不再误退避）。
+                            val cl = response.header("Content-Length")?.toLongOrNull()
+                            val segLen = end - from + 1 + existing  // 原始区间总长度（含已续传部分）= end - start + 1
+                            val isWholeFile = cl == null || cl >= segLen
+                            if (isWholeFile) {
+                                Log.w(TAG, "downloadChunk: task=$taskId range=$from-$end 服务器返回200整文件(CL=$cl) → 触发回退单流")
+                                ChunkResult.RANGE_IGNORED
+                            } else {
+                                // 当 206 处理：只读区间字节（writeSlice 严格截断，天然只写 [from, end]）
+                                val body = response.body ?: return@use ChunkResult.FAILED
+                                val expected = if (unknownTotal) -1L else end - from + 1
+                                val written = writeSlice(body.byteStream(), partFile, existing, expected, onBytes)
+                                if (!unknownTotal && written != expected) {
+                                    Log.w(TAG, "downloadChunk: task=$taskId 200转206写入不足 written=$written 预期=$expected")
+                                    ChunkResult.FAILED
+                                } else {
+                                    ChunkResult.OK
+                                }
+                            }
+                        }
                     }
                     else -> {
                         Log.w(TAG, "downloadChunk: task=$taskId 非预期状态码 $code")
@@ -235,10 +256,12 @@ class ChunkDownloader(private val client: OkHttpClient) {
         url: String,
         partFile: File,
         headers: Map<String, String>,
+        /** 已知总大小（字节）；-1/0 = 未知，不截断（流式场景） */
+        total: Long = -1L,
         onBytes: suspend (Long) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         val existing = partFile.length()
-        Log.d(TAG, "downloadFull: task=$taskId 完整下载 url=${url.take(120)} 已有=$existing")
+        Log.d(TAG, "downloadFull: task=$taskId 完整下载 url=${url.take(120)} 已有=$existing total=$total")
         val request = Request.Builder()
             .url(url)
             .apply { headers.forEach { (k, v) -> header(k, v) } }
@@ -255,6 +278,9 @@ class ChunkDownloader(private val client: OkHttpClient) {
                 }
                 if (!response.isSuccessful) throw IllegalStateException("下载失败 HTTP ${response.code}")
                 val body = response.body ?: return@use false
+                // 已知总大小时写时硬截断：服务器多给/Content-Range 偏差的字节直接丢弃，文件永不膨胀
+                val expected = if (total > 0) (total - existing).coerceAtLeast(0) else -1L
+                var written = 0L
                 RandomAccessFile(partFile, "rw").use { raf ->
                     raf.seek(existing)
                     body.byteStream().use { input ->
@@ -262,10 +288,20 @@ class ChunkDownloader(private val client: OkHttpClient) {
                         while (true) {
                             val read = input.read(buffer)
                             if (read <= 0) break
-                            raf.write(buffer, 0, read)
-                            onBytes(read.toLong())
+                            val allow = if (expected < 0) read.toLong()
+                            else min(read.toLong(), expected - written)
+                            if (allow <= 0) break
+                            raf.write(buffer, 0, allow.toInt())
+                            written += allow
+                            onBytes(allow)
+                            if (expected >= 0 && written >= expected) break
                         }
                     }
+                }
+                // 已知总大小：落盘必须恰好达到 total，否则视为失败（防空洞/截断损坏）
+                if (total > 0 && existing + written < total) {
+                    Log.w(TAG, "downloadFull: task=$taskId 写入不足 written=${existing + written} 预期=$total")
+                    return@use false
                 }
                 true
             }

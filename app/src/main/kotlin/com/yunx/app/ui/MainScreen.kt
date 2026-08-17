@@ -124,6 +124,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import java.util.concurrent.TimeUnit
 
 /**
@@ -231,6 +232,8 @@ fun MainScreen() {
                     timeUnit = TimeUnit.MINUTES
                 )
             )
+            // HTTP/2 多路复用：多个 Range 流共享一条 TCP 连接，减少 TLS 握手/慢启动开销（CDN 不支持 h2 时自动降级 HTTP/1.1）
+            .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)        // 从默认 10s 放宽，链路抖动不误判失败
             .writeTimeout(30, TimeUnit.SECONDS)

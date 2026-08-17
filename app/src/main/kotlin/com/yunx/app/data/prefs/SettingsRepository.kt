@@ -24,7 +24,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putString("download_dir_uri", value).apply()
         }
 
-    /** 最大同时下载任务数（默认 3，范围 1-10） */
+    /** 最大同时下载任务数（默认 1：前台任务吃满带宽，其余排队；参考 IDM 默认单任务满速） */
     var maxConcurrentDownloads: Int
         get() = prefs.getInt("max_concurrent_downloads", DEFAULT_MAX_CONCURRENT_DOWNLOADS)
         set(value) {
@@ -96,7 +96,7 @@ class SettingsRepository(context: Context) {
 
     companion object {
         const val DEFAULT_DOWNLOAD_THREADS = 16
-        const val DEFAULT_MAX_CONCURRENT_DOWNLOADS = 3
+        const val DEFAULT_MAX_CONCURRENT_DOWNLOADS = 1
         const val DEFAULT_DOWNLOAD_RETRY_COUNT = 3
 
         /** 默认主题种子色：Material Blue（与内置默认方案一致） */

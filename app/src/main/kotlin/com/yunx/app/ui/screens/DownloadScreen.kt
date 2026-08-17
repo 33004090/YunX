@@ -416,7 +416,8 @@ private fun FolderDownloadGroup(
     var expanded by remember { mutableStateOf(true) }
     val completed = tasks.count { it.status == DownloadTaskEntity.STATUS_COMPLETED }
     val totalSize = tasks.sumOf { it.totalSize }
-    val downloaded = tasks.sumOf { it.downloadedSize }
+    // 聚合显示钳制：任何单项竞态残留都不会让"已下载 > 总大小"
+    val downloaded = minOf(tasks.sumOf { it.downloadedSize }, totalSize)
     val fraction = if (totalSize > 0) {
         (downloaded.toFloat() / totalSize).coerceIn(0f, 1f)
     } else 0f
@@ -813,7 +814,9 @@ private fun DownloadTaskCard(
 private fun taskStatusLine(task: DownloadTaskEntity): String {
     val status = DownloadTaskEntity.statusText(task.status)
     return if (task.totalSize > 0) {
-        "$status · ${formatSize(task.downloadedSize)} / ${formatSize(task.totalSize)}"
+        // 显示值钳制到 total（防恢复竞态残留导致显示超总大小）
+        val shown = minOf(task.downloadedSize, task.totalSize)
+        "$status · ${formatSize(shown)} / ${formatSize(task.totalSize)}"
     } else {
         status
     }
@@ -821,8 +824,10 @@ private fun taskStatusLine(task: DownloadTaskEntity): String {
 
 private fun progressText(task: DownloadTaskEntity): String {
     if (task.totalSize <= 0) return ""
-    val percent = (task.downloadedSize * 100 / task.totalSize).toInt().coerceIn(0, 100)
-    return "已下载 ${formatSize(task.downloadedSize)} / ${formatSize(task.totalSize)} · $percent%"
+    // 显示值钳制到 total（防恢复竞态残留导致显示超总大小）
+    val shown = minOf(task.downloadedSize, task.totalSize)
+    val percent = (shown * 100 / task.totalSize).toInt().coerceIn(0, 100)
+    return "已下载 ${formatSize(shown)} / ${formatSize(task.totalSize)} · $percent%"
 }
 
 private fun formatSize(bytes: Long): String {
