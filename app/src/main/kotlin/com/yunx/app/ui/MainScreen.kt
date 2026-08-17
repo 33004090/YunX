@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -28,6 +29,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
@@ -48,14 +50,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.content.res.Configuration
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.yunx.app.data.db.AppDatabase
+import com.yunx.app.data.db.DownloadTaskEntity
 import com.yunx.app.data.download.ChunkDownloader
 import com.yunx.app.data.download.DownloadManager
 import com.yunx.app.data.backup.AuthBackupManager
@@ -418,11 +424,35 @@ fun MainScreen() {
     val c139Account by c139ViewModel.c139Account.collectAsState()
     val pan123Account by pan123ViewModel.pan123Account.collectAsState()
 
+    // 首次下载引导：锁屏保持下载默认开启，但新用户未加入「忽略电池优化」白名单 →引导一次
+    var showBatteryGuide by remember { mutableStateOf(false) }
+    var batteryGuideShown by remember { mutableStateOf(false) }
+
     // 解析页发起下载后，自动切换到「下载」Tab
     LaunchedEffect(resolveViewModel.downloadStarted) {
         if (resolveViewModel.downloadStarted) {
             currentTab = MainTab.Download
             resolveViewModel.consumeDownloadStarted()
+        }
+    }
+
+    // 首次下载任务启动：锁屏保持下载默认开启但未豁免电池优化 →引导一次。
+    // 监听任务状态而非 downloadStarted，覆盖解析页/网盘页/手动添加等所有下载入口。
+    LaunchedEffect(Unit) {
+        downloadViewModel.tasks.collect { tasks ->
+            if (!batteryGuideShown && tasks.any {
+                    it.status == DownloadTaskEntity.STATUS_DOWNLOADING ||
+                        it.status == DownloadTaskEntity.STATUS_PENDING
+                }
+            ) {
+                batteryGuideShown = true
+                val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                if (settings.keepDownloadWhenLocked &&
+                    pm?.isIgnoringBatteryOptimizations(context.packageName) != true
+                ) {
+                    showBatteryGuide = true
+                }
+            }
         }
     }
 
@@ -732,6 +762,38 @@ fun MainScreen() {
             onBack = { showTheme = false }
         )
     }
+    }
+
+    // 首次下载引导：加入「忽略电池优化」白名单（锁屏保持下载生效的前提）
+    if (showBatteryGuide) {
+        AlertDialog(
+            onDismissRequest = { showBatteryGuide = false },
+            title = { Text("保持后台下载") },
+            text = {
+                Text(
+                    text = "「锁屏后保持下载」已开启，但应用尚未加入「忽略电池优化」白名单，息屏后可能被系统中断下载。是否前往系统设置？",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showBatteryGuide = false
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                    Uri.parse("package:${context.packageName}")
+                                )
+                            )
+                        }
+                    }
+                ) { Text("前往设置") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatteryGuide = false }) { Text("暂不") }
+            }
+        )
     }
 
     // 发现新版本弹窗（覆盖在主页之上）

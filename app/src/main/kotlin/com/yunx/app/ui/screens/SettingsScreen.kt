@@ -1,5 +1,9 @@
 package com.yunx.app.ui.screens
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
@@ -121,6 +125,15 @@ fun SettingsScreen(
     var keepLocked by remember { mutableStateOf(settingsRepo.keepDownloadWhenLocked) }
     var showSpeed by remember { mutableStateOf(settingsRepo.notificationShowSpeed) }
     var showBatteryDialog by remember { mutableStateOf(false) }
+    // 通知权限（Android 13+）：未授权时点击「通知栏下载进度」先申请，授权后生效
+    val notifyPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            showSpeed = true
+            settingsRepo.notificationShowSpeed = true
+        }
+    }
     val dirLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -264,10 +277,25 @@ fun SettingsScreen(
         SettingsItem(
             icon = Icons.Outlined.Notifications,
             title = "通知栏下载进度",
-            description = if (showSpeed) "完整通知：进度条 + 下载速度" else "仅显示通知（隐藏下载速度）",
+            description = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED ->
+                    "未授予通知权限，下载通知将不可见（点击申请）"
+                showSpeed -> "完整通知：进度条 + 下载速度"
+                else -> "仅显示通知（隐藏下载速度）"
+            },
             onClick = {
-                showSpeed = !showSpeed
-                settingsRepo.notificationShowSpeed = showSpeed
+                // Android 13+ 未授权：先申请通知权限，授权后自动开启完整通知
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED
+                ) {
+                    notifyPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    showSpeed = !showSpeed
+                    settingsRepo.notificationShowSpeed = showSpeed
+                }
             },
             trailing = { Switch(checked = showSpeed, onCheckedChange = null) }
         )
