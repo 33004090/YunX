@@ -10,11 +10,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.URLEncoder
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 /**
  * 百度网盘分享解析数据（xpan/share list 响应）。
@@ -40,25 +35,8 @@ data class BaiduTransferResult(
  * 全部基于抓包字段，错误码用 errno（0 表示成功）判定。
  */
 class BaiduApi(
-    private val client: OkHttpClient = createUnsafeClient()
+    private val client: OkHttpClient = OkHttpClient()
 ) {
-
-    companion object {
-        /** 信任所有证书的 Client（调试/抓包用，与 QuarkApi 一致；上线前应改回默认校验） */
-        fun createUnsafeClient(): OkHttpClient {
-            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            })
-            val sslContext = SSLContext.getInstance("TLS")
-            sslContext.init(null, trustAllCerts, SecureRandom())
-            return OkHttpClient.Builder()
-                .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
-                .hostnameVerifier { _, _ -> true }
-                .build()
-        }
-    }
 
     private val formMediaType = "application/x-www-form-urlencoded".toMediaType()
 
@@ -137,13 +115,13 @@ class BaiduApi(
  * @param dir 分享内目录路径，根目录传 "/"（子目录传 "/folder"）
  * @return 文件列表 + share_id/uk（转存需要）
  */
-suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String): BaiduShareList =
+suspend fun listShare(surl: String, sekey: String, dir: String, cookie: String, page: Int = 1): BaiduShareList =
     withContext(Dispatchers.IO) {
         val isRoot = dir.isBlank() || dir == "/"
         val root = if (isRoot) "1" else "0"
         val sekeyPart = if (sekey.isNotBlank()) "&sekey=$sekey" else ""
         val url = "https://pan.baidu.com/rest/2.0/xpan/share?method=list" +
-            "&shorturl=$surl&page=1&num=100&root=$root&dir=" +
+            "&shorturl=$surl&page=$page&num=100&root=$root&dir=" +
             URLEncoder.encode(if (dir.isBlank()) "/" else dir, "UTF-8") +
             sekeyPart
         // 子目录(root=0)必须携带 BDCLND（= verify 的 randsk），否则 errno=2；顶层(root=1)无需

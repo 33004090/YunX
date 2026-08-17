@@ -2,6 +2,7 @@ package com.yunx.app.data.db
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.ColumnInfo
 
 /**
  * 下载任务（Room 持久化，断点续传依赖 part 文件 + 已下载大小）。
@@ -19,6 +20,18 @@ data class DownloadTaskEntity(
     val errorMsg: String = "",
     /** 完成后的保存位置：MediaStore uri 或文件绝对路径 */
     val savePath: String = "",
+    /** 恢复任务所需的请求头 JSON（Cookie/Referer/UA 等） */
+    @ColumnInfo(defaultValue = "'{}'")
+    val requestHeadersJson: String = "{}",
+    /** 首次探测大小后固定的分片数，恢复时不随设置变化 */
+    @ColumnInfo(defaultValue = "0")
+    val chunkCount: Int = 0,
+    /** 与 chunkCount 对应的服务器总大小 */
+    @ColumnInfo(defaultValue = "0")
+    val plannedTotalSize: Long = 0L,
+    /** 下载完成/删除任务后应清理的云端临时目录 ID（当前为夸克） */
+    @ColumnInfo(defaultValue = "''")
+    val cleanupId: String = "",
     val createTime: Long = System.currentTimeMillis()
 ) {
     companion object {

@@ -15,11 +15,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 /**
  * 夸克 Cookie 工具：合并/剥离 __puus、__pus（对应 AList pkg/cookie + quark_uc requestWithCookie）。
@@ -58,10 +53,9 @@ object QuarkCookieUtil {
 
 /**
  * 夸克 API 封装（OkHttp）：账号验证 + 分享解析 + 下载直链。
- * 注意：当前关闭 SSL 证书校验，仅用于调试/抓包，上线前务必恢复。
  */
 class QuarkApi(
-    private val client: OkHttpClient = createUnsafeClient()
+    private val client: OkHttpClient = OkHttpClient()
 ) {
 
     /**
@@ -69,23 +63,6 @@ class QuarkApi(
      * 每次响应把 Set-Cookie 合并后的最新 Cookie 回调，保持 __puus/__pus 始终新鲜。
      */
     var cookieSink: ((String) -> Unit)? = null
-
-    companion object {
-        /** 信任所有证书的 Client（调试用，禁止用于生产） */
-        fun createUnsafeClient(): OkHttpClient {
-            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            })
-            val sslContext = SSLContext.getInstance("TLS")
-            sslContext.init(null, trustAllCerts, SecureRandom())
-            return OkHttpClient.Builder()
-                .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
-                .hostnameVerifier { _, _ -> true }
-                .build()
-        }
-    }
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 

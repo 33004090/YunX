@@ -18,7 +18,7 @@
 
     <application
         android:name=".YunXApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@drawable/icon"
         android:label="@string/app_name"
         android:roundIcon="@drawable/icon"

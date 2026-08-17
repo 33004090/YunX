@@ -70,12 +70,29 @@ class XunleiResolveRepository(
         runCatching {
             val access = access()
             // 迅雷分享：顶层用 share（带提取码）；子目录用 share/detail（parent_id + pass_code_token）
-            val files = if (dirFid.isBlank() || dirFid == "0") {
-                api.getShare(session.shareId, passCodes[session.shareId] ?: "", access, deviceId(), captcha())?.files
-            } else {
-                api.getShareDetail(session.shareId, dirFid, session.stoken, access, deviceId(), captcha())
-            }
-            files ?: throw IllegalStateException("未获取到文件列表")
+            val files = mutableListOf<ShareFile>()
+            var pageToken = ""
+            var pages = 0
+            do {
+                val next = if (dirFid.isBlank() || dirFid == "0") {
+                    val page = api.getShare(
+                        session.shareId, passCodes[session.shareId] ?: "", access,
+                        deviceId(), captcha(), pageToken
+                    ) ?: throw IllegalStateException("未获取到文件列表")
+                    files += page.files
+                    page.nextPageToken
+                } else {
+                    val page = api.getShareDetail(
+                        session.shareId, dirFid, session.stoken, access,
+                        deviceId(), captcha(), pageToken
+                    ) ?: throw IllegalStateException("未获取到文件列表")
+                    files += page.files
+                    page.nextPageToken
+                }
+                pageToken = next
+                pages++
+            } while (pageToken.isNotBlank() && pages < 100)
+            files
         }.fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(it) }

@@ -636,9 +636,9 @@ class ResolveViewModel(
         // 弹窗被关闭（用户点管壁/「关闭」，未开始下载）：清理夸克临时转存，避免云端残留
         if (link?.cleanupDirFid != null) {
             viewModelScope.launch {
-                val credential = currentCredential() ?: return@launch
+                val credential = accountRepository.getAccount()?.cookie ?: return@launch
                 link.cleanupDirFid?.let { dirFid ->
-                    currentRepo().cleanupTempDir(dirFid, credential)
+                    resolveRepository.cleanupTempDir(dirFid, credential)
                 }
             }
         }
@@ -704,12 +704,9 @@ class ResolveViewModel(
             url = effectiveUrl,
             fileName = fileName,
             headers = headers,
-            // 下载成功完成后：清理夸克临时转存子目录（根治 21001；其它平台 cleanupDirFid 为 null 自动跳过）
-            onComplete = {
-                link.cleanupDirFid?.let { dirFid ->
-                    currentRepo().cleanupTempDir(dirFid, effectiveCredential)
-                }
-            }
+            size = link.size,
+            // 随任务持久化，不再闭包捕获可变的 currentPlatform
+            cleanupId = link.cleanupDirFid.orEmpty()
         )
     }
 

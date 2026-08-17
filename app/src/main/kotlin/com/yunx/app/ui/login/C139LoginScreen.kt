@@ -1,12 +1,10 @@
 package com.yunx.app.ui.login
 
 import android.graphics.Bitmap
-import android.net.http.SslError
 import android.os.Build
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
-import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -135,16 +133,6 @@ fun C139LoginScreen(
                     errorResponse: WebResourceResponse?
                 ) {
                     Log.e(TAG, "onReceivedHttpError: status=${errorResponse?.statusCode} reason=${errorResponse?.reasonPhrase} url=${request?.url}")
-                }
-
-                override fun onReceivedSslError(
-                    view: WebView?,
-                    handler: SslErrorHandler?,
-                    error: SslError?
-                ) {
-                    Log.e(TAG, "onReceivedSslError: primary=${error?.primaryError} url=${error?.url}")
-                    // 调试/抓包：忽略 SSL 证书错误（139 证书链或 ProxyPin CA 不受系统信任时白屏）
-                    handler?.proceed()
                 }
 
                 @RequiresApi(Build.VERSION_CODES.O)

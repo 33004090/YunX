@@ -21,8 +21,11 @@ data class XunleiShareResult(
     val title: String,
     val files: List<ShareFile>,
     val passCodeToken: String,
-    val shareId: String
+    val shareId: String,
+    val nextPageToken: String = ""
 )
+
+data class XunleiFilePage(val files: List<ShareFile>, val nextPageToken: String)
 
 /** 迅雷登录中间结果 */
 data class XunleiLoginStep(
@@ -43,7 +46,7 @@ data class XunleiLoginStep(
  * - Pan：文件列表 / 分享解析 / 转存 / 直链（Bearer 认证，无需 x-signature，抓包确认）
  */
 class XunleiApi(
-    private val client: OkHttpClient = QuarkApi.createUnsafeClient()
+    private val client: OkHttpClient = OkHttpClient()
 ) {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -405,13 +408,16 @@ class XunleiApi(
         passCode: String,
         accessToken: String,
         deviceId: String,
-        captchaToken: String
+        captchaToken: String,
+        pageToken: String = ""
     ): XunleiShareResult? = withContext(Dispatchers.IO) {
         val url = buildString {
             append(XunleiConstants.SHARE_URL)
             append("?share_id=").append(shareId)
             append("&pass_code=").append(java.net.URLEncoder.encode(passCode, "UTF-8"))
-            append("&limit=100&page_token=&thumbnail_size=SIZE_SMALL")
+            append("&limit=100&page_token=")
+                .append(java.net.URLEncoder.encode(pageToken, "UTF-8"))
+                .append("&thumbnail_size=SIZE_SMALL")
         }
         panCall(captchaToken, deviceId, "GET:/drive/v1/share", { t ->
             panRequest(url, accessToken, deviceId, t)
@@ -428,7 +434,8 @@ class XunleiApi(
                 title = data.optString("title"),
                 files = files,
                 passCodeToken = data.optString("pass_code_token"),
-                shareId = shareId
+                shareId = shareId,
+                nextPageToken = data.optString("next_page_token")
             )
         }
     }
@@ -440,19 +447,25 @@ class XunleiApi(
         passCodeToken: String,
         accessToken: String,
         deviceId: String,
-        captchaToken: String
-    ): List<ShareFile>? = withContext(Dispatchers.IO) {
+        captchaToken: String,
+        pageToken: String = ""
+    ): XunleiFilePage? = withContext(Dispatchers.IO) {
         val url = buildString {
             append(XunleiConstants.SHARE_DETAIL_URL)
             append("?share_id=").append(shareId)
             append("&parent_id=").append(parentId)
             append("&pass_code_token=").append(java.net.URLEncoder.encode(passCodeToken, "UTF-8"))
-            append("&limit=100&page_token=&thumbnail_size=SIZE_SMALL")
+            append("&limit=100&page_token=")
+                .append(java.net.URLEncoder.encode(pageToken, "UTF-8"))
+                .append("&thumbnail_size=SIZE_SMALL")
         }
         panCall(captchaToken, deviceId, "GET:/drive/v1/share/detail", { t ->
             panRequest(url, accessToken, deviceId, t)
         }) { data ->
-            data.optJSONArray("files")?.let(::parseFileArray) ?: emptyList()
+            XunleiFilePage(
+                files = data.optJSONArray("files")?.let(::parseFileArray) ?: emptyList(),
+                nextPageToken = data.optString("next_page_token")
+            )
         }
     }
 

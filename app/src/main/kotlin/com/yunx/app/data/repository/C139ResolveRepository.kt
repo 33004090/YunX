@@ -41,7 +41,14 @@ class C139ResolveRepository(private val api: C139Api) : ShareResolveRepository {
             // pCaID 根目录必须传 "root"（§16.2：空串会报 pCaID不能为空），子目录传父 caID / coID
             val pcaId = if (dirFid == "0" || dirFid.isBlank()) "root" else dirFid
             // passwd = 分享提取码（createSession 时存入 stoken；无则空串）
-            api.getShareFiles(session.shareId, pcaId, session.stoken)
+            val all = mutableListOf<ShareFile>()
+            var begin = 1
+            do {
+                val batch = api.getShareFiles(session.shareId, pcaId, session.stoken, begin, begin + 199)
+                all += batch
+                begin += 200
+            } while (batch.size == 200 && begin <= 20_000)
+            all
         }.fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(it) }

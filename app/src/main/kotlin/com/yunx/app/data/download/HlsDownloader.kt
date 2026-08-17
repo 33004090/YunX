@@ -3,11 +3,13 @@ package com.yunx.app.data.download
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Job
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.coroutineContext
 
 /**
  * 轻量 HLS 下载器（UC play 转码流，绕过非会员视频被换成宣传片的问题）：
@@ -76,21 +78,25 @@ object HlsDownloader {
         }
     }
 
-    private fun fetchText(url: String, headers: Map<String, String>): String? = runCatching {
+    private suspend fun fetchText(url: String, headers: Map<String, String>): String? = runCatching {
         val req = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.get().build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return@runCatching null
-            resp.body?.string()
-        }
+        executeCancellable(req) { resp -> if (resp.isSuccessful) resp.body?.string() else null }
     }.getOrNull()
 
-    private fun fetchBytes(url: String, headers: Map<String, String>): ByteArray? = runCatching {
+    private suspend fun fetchBytes(url: String, headers: Map<String, String>): ByteArray? = runCatching {
         val req = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.get().build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return@runCatching null
-            resp.body?.bytes()
-        }
+        executeCancellable(req) { resp -> if (resp.isSuccessful) resp.body?.bytes() else null }
     }.getOrNull()
+
+    private suspend fun <T> executeCancellable(request: Request, block: (okhttp3.Response) -> T): T {
+        val call = client.newCall(request)
+        val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
+        return try {
+            call.execute().use(block)
+        } finally {
+            cancelHandle?.dispose()
+        }
+    }
 
     /** 若为 master playlist（含 #EXT-X-STREAM-INF），返回第一个子流 URL；否则原样返回 */
     private fun resolveMediaPlaylist(playlistUrl: String, text: String): String? {

@@ -19,24 +19,26 @@ data class ParsedShare(
 object ShareLinkParser {
 
     private val urlRegex = Regex("""https?://[^\s]+""")
-    private val quarkShareIdRegex = Regex("""pan\.quark\.cn/s/([A-Za-z0-9]+)""")
-    private val ucShareIdRegex = Regex("""drive\.uc\.cn/s/([A-Za-z0-9]+)""")
-    private val xunleiShareIdRegex = Regex("""pan\.xunlei\.com/s/([A-Za-z0-9_-]+)""")
-    private val baiduShareIdRegex = Regex("""pan\.baidu\.com/s/(1[A-Za-z0-9_-]+)""")
-    private val c139ShareIdRegex = Regex("""yun\.139\.com/shareweb/.*?/w/i/([A-Za-z0-9_-]+)""")
+    private val quarkShareIdRegex = Regex("""pan\.quark\.cn/s/([A-Za-z0-9]+)""", RegexOption.IGNORE_CASE)
+    private val ucShareIdRegex = Regex("""drive\.uc\.cn/s/([A-Za-z0-9]+)""", RegexOption.IGNORE_CASE)
+    private val xunleiShareIdRegex = Regex("""pan\.xunlei\.com/s/([A-Za-z0-9_-]+)""", RegexOption.IGNORE_CASE)
+    private val baiduShareIdRegex = Regex("""pan\.baidu\.com/s/(1[A-Za-z0-9_-]+)""", RegexOption.IGNORE_CASE)
+    private val c139ShareIdRegex = Regex("""yun\.139\.com/shareweb/.*?/w/i/([A-Za-z0-9_-]+)""", RegexOption.IGNORE_CASE)
     // 123 云盘分享链接（抓包 + alist 实践综合，文档 §4.1）：
     // - https://www.123pan.com/s/<ShareKey> / https://www.123865.com/s/<ShareKey>
     // - https://<UID>.share.123pan.cn/123pan/<ShareKey>
     // - https://www.123pan.cn/api/srr?sk=<ShareKey>&st=s
     // ShareKey 形态：含一个中划线、两端为字母数字，如 2785Vv-T4Ded
-    private val pan123ShareIdRegex = Regex("""123(?:865|pan)\.(?:com|cn)/s/([A-Za-z0-9]+-[A-Za-z0-9]+)""")
-    private val pan123ShareSubRegex = Regex("""share\.123pan\.cn/123pan/([A-Za-z0-9-]+)""")
-    private val pan123SrrRegex = Regex("""api/srr\?sk=([A-Za-z0-9-]+)""")
+    private val pan123ShareIdRegex = Regex("""123(?:865|pan)\.(?:com|cn)/s/([A-Za-z0-9]+-[A-Za-z0-9]+)""", RegexOption.IGNORE_CASE)
+    private val pan123ShareSubRegex = Regex("""share\.123pan\.cn/123pan/([A-Za-z0-9-]+)""", RegexOption.IGNORE_CASE)
+    private val pan123SrrRegex = Regex("""api/srr\?sk=([A-Za-z0-9-]+)""", RegexOption.IGNORE_CASE)
     private val pwdInUrlRegex = Regex("""[?&]pwd=([A-Za-z0-9]+)""")
-    private val pwdInTextRegex = Regex("""提取码[：:]\s*([A-Za-z0-9]{4})""")
+    private val pwdInTextRegex = Regex("""(?:提取码|访问码|密码)[：:]\s*([A-Za-z0-9]{4,8})""")
 
     fun parse(text: String): ParsedShare? {
-        val url = urlRegex.find(text.trim())?.value ?: return null
+        val url = urlRegex.find(text.trim())?.value
+            ?.trimEnd('。', '，', ',', '；', ';', ')', ']', '}', '"', '\'')
+            ?: return null
         // 夸克链接
         quarkShareIdRegex.find(url)?.groupValues?.getOrNull(1)?.let { sid ->
             val pwd = pwdInUrlRegex.find(url)?.groupValues?.getOrNull(1)

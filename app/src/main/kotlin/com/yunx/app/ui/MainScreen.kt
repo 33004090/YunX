@@ -197,6 +197,7 @@ fun MainScreen() {
     val pan123Repository = remember {
         Pan123AccountRepository(db.pan123AccountDao(), pan123Api)
     }
+    val quarkResolveRepository = remember { QuarkResolveRepository(api) }
     // 网盘认证备份：打包/恢复各平台凭证
     val backupManager = remember {
         AuthBackupManager(
@@ -213,8 +214,8 @@ fun MainScreen() {
     // 这里提升到与设置页线程数上限（32）对齐，并放宽超时避免弱网误判失败
     val downloadClient = remember {
         val dispatcher = Dispatcher().apply {
-            maxRequests = 512
-            maxRequestsPerHost = 512   // 与设置页线程数上限（512）对齐，不锁死并发
+            maxRequests = 64
+            maxRequestsPerHost = 32
         }
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
@@ -247,6 +248,12 @@ fun MainScreen() {
             keepWhenLockedProvider = { settings.keepDownloadWhenLocked },
             showSpeedProvider = { settings.notificationShowSpeed }
         )
+    }
+    // 云端临时目录的清理信息随下载任务持久化，进程重启后仍可执行
+    downloadManager.persistentCleanup = { dirFid ->
+        repository.getAccount()?.cookie?.takeIf { it.isNotBlank() }?.let { cookie ->
+            quarkResolveRepository.cleanupTempDir(dirFid, cookie)
+        }
     }
     // Android 9- 写公共 Download 需要 WRITE_EXTERNAL_STORAGE 运行时授权：
     // 下载完成保存前由 DownloadManager.storagePermissionProvider 触发动态申请，授权后自动继续保存
@@ -394,7 +401,7 @@ fun MainScreen() {
     val resolveViewModel: ResolveViewModel = viewModel(
         factory = ResolveViewModel.Factory(
             repository,
-            QuarkResolveRepository(api),
+            quarkResolveRepository,
             ucRepository,
             UCResolveRepository(ucApi),
             xunleiRepository,

@@ -172,6 +172,15 @@ class ChunkDownloader(private val client: OkHttpClient) {
                 }
                 when (val code = response.code) {
                     206 -> {
+                        val rangeStart = response.header("Content-Range")
+                            ?.substringBefore('/')
+                            ?.substringAfter("bytes ")
+                            ?.substringBefore('-')
+                            ?.toLongOrNull()
+                        if (rangeStart != from) {
+                            Log.w(TAG, "downloadChunk: task=$taskId Content-Range 起点错误 actual=$rangeStart expected=$from")
+                            return@use ChunkResult.FAILED
+                        }
                         val body = response.body ?: return@use ChunkResult.FAILED
                         val expected = if (unknownTotal) -1L else end - from + 1
                         // 写入分片，严格截断到预期区间
@@ -237,8 +246,7 @@ class ChunkDownloader(private val client: OkHttpClient) {
         headers: Map<String, String>,
         onBytes: suspend (Long) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
-        val existing = partFile.length()
-        Log.d(TAG, "downloadFull: task=$taskId 完整下载 url=${url.take(120)} 已有=$existing")
+        Log.d(TAG, "downloadFull: task=$taskId 完整下载 url=${url.take(120)}")
         val request = Request.Builder()
             .url(url)
             .apply { headers.forEach { (k, v) -> header(k, v) } }
@@ -256,7 +264,9 @@ class ChunkDownloader(private val client: OkHttpClient) {
                 if (!response.isSuccessful) throw IllegalStateException("下载失败 HTTP ${response.code}")
                 val body = response.body ?: return@use false
                 RandomAccessFile(partFile, "rw").use { raf ->
-                    raf.seek(existing)
+                    // 该请求是无 Range 的完整 GET，始终覆盖旧文件
+                    raf.setLength(0)
+                    raf.seek(0)
                     body.byteStream().use { input ->
                         val buffer = ByteArray(BUFFER_SIZE)
                         while (true) {
