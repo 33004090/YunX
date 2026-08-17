@@ -146,9 +146,9 @@ fun DownloadScreen(
                 ) {
                     // 根目录任务（无相对路径）单独显示
                     val rootTasks = tasks.filter { !it.fileName.contains('/') }
-                    // 文件夹下载任务：按目录路径分组，合并为一个可展开项
+                    // 文件夹下载任务：按「顶级目录」分组（整个文件夹归为一组，内部子文件夹不拆开）
                     val folderGroups = tasks.filter { it.fileName.contains('/') }
-                        .groupBy { it.fileName.substringBeforeLast('/') }
+                        .groupBy { it.fileName.substringBefore('/') }
 
                     items(rootTasks, key = { it.id }) { task ->
                         DownloadTaskCard(
@@ -401,8 +401,8 @@ private fun EmptyDownloadState(modifier: Modifier = Modifier) {
 }
 
 /**
- * 文件夹下载组：同一目录下的多个任务合并为一个可展开卡片。
- * 收起时显示文件夹名 + 任务统计 + 总体进度；展开后显示子任务列表。
+ * 文件夹下载组：同一「顶级目录」下的所有任务合并为一个可展开卡片。
+ * 收起时显示文件夹名 + 统计 + 总体进度；展开后显示子任务（含子文件夹内文件）紧凑列表。
  */
 @Composable
 private fun FolderDownloadGroup(
@@ -420,6 +420,7 @@ private fun FolderDownloadGroup(
     val fraction = if (totalSize > 0) {
         (downloaded.toFloat() / totalSize).coerceIn(0f, 1f)
     } else 0f
+    val done = completed == tasks.size
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -434,23 +435,20 @@ private fun FolderDownloadGroup(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
-                    .padding(
-                        start = 14.dp, end = 12.dp, top = 12.dp,
-                        bottom = 10.dp
-                    ),
+                    .padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 文件夹图标（圆角方块）
+                // 文件夹图标（圆角方块，主色容器）
                 Surface(
-                    modifier = Modifier.size(42.dp),
-                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Outlined.Folder,
                             contentDescription = null,
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(24.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
@@ -460,7 +458,7 @@ private fun FolderDownloadGroup(
                     Text(
                         text = folder,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -471,20 +469,20 @@ private fun FolderDownloadGroup(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                // 总体进度百分比徽标
+                // 总体进度徽标
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = if (completed == tasks.size) {
+                    color = if (done) {
                         MaterialTheme.colorScheme.secondaryContainer
                     } else {
                         MaterialTheme.colorScheme.surfaceContainerHighest
                     }
                 ) {
                     Text(
-                        text = if (completed == tasks.size) "已完成" else "${(fraction * 100).toInt()}%",
+                        text = if (done) "已完成" else "${(fraction * 100).toInt()}%",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (completed == tasks.size) {
+                        color = if (done) {
                             MaterialTheme.colorScheme.onSecondaryContainer
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
@@ -492,7 +490,7 @@ private fun FolderDownloadGroup(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(2.dp))
                 Icon(
                     imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                     contentDescription = if (expanded) "收起" else "展开",
@@ -500,14 +498,14 @@ private fun FolderDownloadGroup(
                 )
             }
 
-            // 展开区：总进度条 + 子任务列表（同一 AnimatedVisibility，动画完全同步不卡顿）
+            // 展开区：总体进度条 + 子任务紧凑列表
             AnimatedVisibility(
                 visible = expanded,
                 enter = fadeIn(tween(200)) + expandVertically(tween(200), expandFrom = Alignment.Top),
                 exit = fadeOut(tween(150)) + shrinkVertically(tween(150), shrinkTowards = Alignment.Top)
             ) {
                 Column {
-                    // 总体进度条（细条 4dp，圆角）
+                    // 总体进度条（细条，圆角）
                     LinearProgressIndicator(
                         progress = { fraction },
                         modifier = Modifier
@@ -518,13 +516,13 @@ private fun FolderDownloadGroup(
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                     )
-                    // 子任务列表
+                    // 子任务列表（紧凑行，含子文件夹内文件）
                     Column(
-                        modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+                        modifier = Modifier.padding(10.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         tasks.forEach { task ->
-                            DownloadTaskCard(
+                            DownloadSubTaskRow(
                                 task = task,
                                 stats = stats[task.id],
                                 onPause = { onPause(task.id) },
@@ -535,6 +533,130 @@ private fun FolderDownloadGroup(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 文件夹组内子任务紧凑行：相对路径 + 状态 + 进度条 + 操作按钮。
+ * 相比独立任务卡更轻量，适合嵌套在文件夹组内。
+ */
+@Composable
+private fun DownloadSubTaskRow(
+    task: DownloadTaskEntity,
+    stats: DownloadStats?,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onRemove: () -> Unit
+) {
+    val context = LocalContext.current
+    val isDownloading = task.status == DownloadTaskEntity.STATUS_DOWNLOADING ||
+        task.status == DownloadTaskEntity.STATUS_PENDING
+    val fraction = if (task.totalSize > 0) {
+        (task.downloadedSize.toFloat() / task.totalSize).coerceIn(0f, 1f)
+    } else 0f
+    // 显示相对路径（去掉顶级目录前缀，如 "A/B/b.mp4" → "B/b.mp4"）
+    val displayName = task.fileName.substringAfter('/')
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 文件小图标
+                Surface(
+                    modifier = Modifier.size(32.dp),
+                    shape = RoundedCornerShape(9.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Outlined.InsertDriveFile,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (isDownloading && stats != null && stats.speed > 0) {
+                            "${DownloadTaskEntity.statusText(task.status)} · ${formatSpeed(stats.speed)}"
+                        } else {
+                            taskStatusLine(task)
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (task.status == DownloadTaskEntity.STATUS_FAILED) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+                // 主操作（暂停/继续/重试/打开）
+                when (task.status) {
+                    DownloadTaskEntity.STATUS_DOWNLOADING,
+                    DownloadTaskEntity.STATUS_PENDING -> IconButton(onClick = onPause, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Outlined.Pause, contentDescription = "暂停",
+                            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    DownloadTaskEntity.STATUS_PAUSED -> IconButton(onClick = onResume, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Outlined.PlayArrow, contentDescription = "继续",
+                            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    DownloadTaskEntity.STATUS_FAILED -> IconButton(onClick = onResume, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Outlined.Refresh, contentDescription = "重试",
+                            tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    DownloadTaskEntity.STATUS_COMPLETED -> IconButton(
+                        onClick = { openSavedFile(context, task.savePath) },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.OpenInNew, contentDescription = "打开",
+                            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                // 删除
+                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Outlined.Delete, contentDescription = "删除",
+                        tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            // 细进度条
+            LinearProgressIndicator(
+                progress = { if (task.status == DownloadTaskEntity.STATUS_COMPLETED) 1f else fraction },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(1.5f)),
+                color = if (task.status == DownloadTaskEntity.STATUS_FAILED) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            )
         }
     }
 }
