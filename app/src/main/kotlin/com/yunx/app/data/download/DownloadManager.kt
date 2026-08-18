@@ -808,7 +808,7 @@ class DownloadManager(
     private suspend fun hlsDownload(id: Long, task: DownloadTaskEntity, headers: Map<String, String>) {
         if (!isTaskActive()) return
         _stats.update { it + (id to DownloadStats(0L, -1L, 1)) }
-        val hlsFile = File(context.cacheDir, "hls_$id")
+        val hlsFile = File(cacheBase(), "hls_$id")
         hlsFile.delete()
         val downloaded = AtomicLong(0)
         val ok = HlsDownloader.download(task.url, headers, hlsFile) { bytes ->
@@ -856,7 +856,7 @@ class DownloadManager(
             }
         }
         // 2) 合并
-        val merged = File(context.cacheDir, "merged_$id")
+        val merged = File(cacheBase(), "merged_$id")
         if (!downloader.mergeChunks(chunkFiles, merged)) {
             Log.e(TAG, "finishDownload: id=$id 合并分片失败")
             throw IllegalStateException("合并分片失败")
@@ -940,8 +940,12 @@ class DownloadManager(
         }
     }
 
-    private fun chunkDirOf(id: Long): File =
-        File(context.filesDir, "download_tmp/$id")
+    /** 下载临时文件缓存根目录：外部缓存（/storage/emulated/0/Android/data/com.yunx.app/cache），
+     *  与最终保存目录解耦，系统可自动清理；外部存储不可用时回退内部缓存目录。 */
+    private fun cacheBase(): File = context.externalCacheDir ?: context.cacheDir
+
+    /** 分片临时文件目录：cacheBase()/download_tmp/$id */
+    private fun chunkDirOf(id: Long): File = File(cacheBase(), "download_tmp/$id")
 
     /** 分片数规划（任务池模型）：分片数 = 线程数 × 8，远多于并发线程数。
      *  worker 循环领取盈余块，任一分片慢时其他线程继续领新片，根治"尾部并发塌缩"；
