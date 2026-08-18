@@ -704,10 +704,17 @@ class ResolveViewModel(
             url = effectiveUrl,
             fileName = fileName,
             headers = headers,
-            size = link.size,
-            // 随任务持久化，不再闭包捕获可变的 currentPlatform
-            cleanupId = link.cleanupDirFid.orEmpty()
-        )
+            size = link.size
+        ) {
+            // 下载完成（master 版通过 onComplete 回调）：清理网盘临时转存目录；失败/取消不触发
+            val dirFid = link.cleanupDirFid
+            if (dirFid != null) {
+                val credential = currentCredential()
+                if (!credential.isNullOrBlank()) {
+                    resolveRepository.cleanupTempDir(dirFid, credential)
+                }
+            }
+        }
     }
 
     /** 将直链加入下载队列（单文件下载：入队后立即切换到下载页） */
