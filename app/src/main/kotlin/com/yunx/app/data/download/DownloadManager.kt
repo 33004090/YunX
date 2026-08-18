@@ -25,6 +25,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -808,7 +809,7 @@ class DownloadManager(
     private suspend fun hlsDownload(id: Long, task: DownloadTaskEntity, headers: Map<String, String>) {
         if (!isTaskActive()) return
         _stats.update { it + (id to DownloadStats(0L, -1L, 1)) }
-        val hlsFile = File(cacheBase(), "hls_$id")
+        val hlsFile = File(context.cacheDir, "hls_$id")
         hlsFile.delete()
         val downloaded = AtomicLong(0)
         val ok = HlsDownloader.download(task.url, headers, hlsFile) { bytes ->
@@ -827,7 +828,9 @@ class DownloadManager(
             hlsFile.delete()
             throw IllegalStateException("未授予存储权限，无法保存到下载目录")
         }
-        val savedPath = DownloadSaver.save(context, task.fileName, hlsFile, saveDirProvider())
+        val savedPath = withContext(Dispatchers.IO) {
+            DownloadSaver.save(context, task.fileName, hlsFile, saveDirProvider())
+        }
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
         Log.d(TAG, "hlsDownload: id=$id 下载完成 savedPath=$savedPath size=${hlsFile.length()}")
@@ -856,7 +859,8 @@ class DownloadManager(
             }
         }
         // 2) 合并
-        val merged = File(cacheBase(), "merged_$id")
+        // ★ 合并产物放内部缓存（data 分区，非 FUSE 挂载）：大文件 IO 快得多；保存完成即删
+        val merged = File(context.cacheDir, "merged_$id")
         if (!downloader.mergeChunks(chunkFiles, merged)) {
             Log.e(TAG, "finishDownload: id=$id 合并分片失败")
             throw IllegalStateException("合并分片失败")
@@ -873,7 +877,11 @@ class DownloadManager(
             throw IllegalStateException("未授予存储权限，无法保存到下载目录")
         }
         // 5) 保存（自定义目录经 SAF 写入；默认目录走 MediaStore/传统路径）
-        val savedPath = DownloadSaver.save(context, fileName, merged, saveDirProvider())
+        // ★ 同步阻塞拷贝必须切 IO 线程：任务跑在 Dispatchers.Default（CPU 池），
+        //   大文件保存若占满 Default 线程会让整个下载器协程饿死（"100% 卡死保存不了"）
+        val savedPath = withContext(Dispatchers.IO) {
+            DownloadSaver.save(context, fileName, merged, saveDirProvider())
+        }
             ?: throw IllegalStateException("保存到下载目录失败")
         dao.complete(id, DownloadTaskEntity.STATUS_COMPLETED, savedPath)
         Log.d(TAG, "finishDownload: id=$id 下载完成 savedPath=$savedPath size=${merged.length()}")

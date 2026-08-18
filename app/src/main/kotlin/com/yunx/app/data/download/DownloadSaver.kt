@@ -21,6 +21,9 @@ object DownloadSaver {
 
     private const val TAG = "YunX-DL"
 
+    /** 大文件拷贝缓冲：1MB（默认 copyTo 8KB 对 GB 级文件是灾难，IO 次数过多导致保存极慢） */
+    private const val COPY_BUFFER_SIZE = 1 * 1024 * 1024
+
     /**
      * 保存文件到下载目录。
      * @param fileName 可为**相对路径**（如 "文件夹A/子/文件.mp4"，用于下载整个文件夹保持目录结构）；
@@ -88,7 +91,7 @@ object DownloadSaver {
                         resolver, dirUri, mimeOf(candidate), candidate
                     ) ?: continue
                     val wrote = resolver.openOutputStream(docUri)?.use { out ->
-                        source.inputStream().use { it.copyTo(out) }
+                        source.inputStream().use { it.copyTo(out, COPY_BUFFER_SIZE) }
                         true
                     } ?: run {
                         resolver.delete(docUri, null, null)
@@ -194,7 +197,7 @@ object DownloadSaver {
                 }
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: continue
                 val wrote = resolver.openOutputStream(uri)?.use { out ->
-                    source.inputStream().use { it.copyTo(out) }
+                    source.inputStream().use { it.copyTo(out, COPY_BUFFER_SIZE) }
                     true
                 } ?: run {
                     resolver.delete(uri, null, null)
