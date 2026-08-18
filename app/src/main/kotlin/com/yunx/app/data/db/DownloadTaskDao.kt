@@ -20,6 +20,12 @@ interface DownloadTaskDao {
     @Query("UPDATE download_task SET status = :status, downloadedSize = :downloadedSize, totalSize = :totalSize WHERE id = :id")
     suspend fun updateProgress(id: Long, status: Int, downloadedSize: Long, totalSize: Long)
 
+    @Query("UPDATE download_task SET chunkCount = :chunkCount, plannedTotalSize = :totalSize WHERE id = :id")
+    suspend fun updatePlan(id: Long, chunkCount: Int, totalSize: Long)
+
+    @Query("UPDATE download_task SET status = 2 WHERE status = 1 OR status = 0")
+    suspend fun markInterruptedAsPaused()
+
     @Query("UPDATE download_task SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: Long, status: Int)
 

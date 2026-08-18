@@ -35,8 +35,15 @@ class UCResolveRepository(private val api: UCApi) : ShareResolveRepository {
     override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
         runCatching {
             // 必须用 transfer_share/detail（带 stoken），返回的 share_fid_token 与 stoken 绑定
-            api.getTransferShareFiles(session.shareId, session.stoken, dirFid, cookie)
-                ?: throw IllegalStateException("未获取到文件列表")
+            val all = mutableListOf<ShareFile>()
+            var page = 1
+            do {
+                val batch = api.getTransferShareFiles(session.shareId, session.stoken, dirFid, cookie, page, 50)
+                    ?: throw IllegalStateException("未获取到文件列表")
+                all += batch
+                page++
+            } while (batch.size == 50 && page <= 100)
+            all
         }.fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(it) }

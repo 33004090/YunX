@@ -44,10 +44,17 @@ class BaiduResolveRepository(private val api: BaiduApi) : ShareResolveRepository
         runCatching {
             val sekey = session.stoken.ifBlank { sekeys[session.shareId] ?: "" }
             // 顶层 dirFid 为空/"/"；子目录 dirFid 为目录 path（如 /folder）
-            val result = api.listShare(session.shareId, sekey, dirFid, cookie)
+            val all = mutableListOf<ShareFile>()
+            var page = 1
+            var result: com.yunx.app.data.network.BaiduShareList
+            do {
+                result = api.listShare(session.shareId, sekey, dirFid, cookie, page)
+                all += result.files
+                page++
+            } while (result.files.size == 100 && page <= 100)
             // 缓存 share_id/uk（转存需要）
             shareInfos[session.shareId] = result.shareId to result.uk
-            result.files
+            all
         }.fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(it) }

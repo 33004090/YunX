@@ -33,8 +33,15 @@ class QuarkResolveRepository(private val api: QuarkApi) : ShareResolveRepository
     /** 获取指定目录下的文件列表 */
     override suspend fun listFiles(session: ShareSession, dirFid: String, cookie: String): Result<List<ShareFile>> =
         runCatching {
-            api.getShareFiles(session.shareId, session.stoken, dirFid, cookie)
-                ?: throw IllegalStateException("未获取到文件列表")
+            val all = mutableListOf<ShareFile>()
+            var page = 1
+            do {
+                val batch = api.getShareFiles(session.shareId, session.stoken, dirFid, cookie, page, 100)
+                    ?: throw IllegalStateException("未获取到文件列表")
+                all += batch
+                page++
+            } while (batch.size == 100 && page <= 100)
+            all
         }.fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(it) }

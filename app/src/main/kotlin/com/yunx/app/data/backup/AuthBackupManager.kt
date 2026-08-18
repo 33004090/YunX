@@ -47,15 +47,16 @@ class AuthBackupManager(
     }
 
     /**
-     * 导出网盘认证（可选 AES 加密）：
-     * @param password 非空则用该密码 AES-GCM 加密；null/空则导出明文 JSON
+     * 导出网盘认证（强制 AES-GCM 加密）：
+     * @param password 至少 8 位的备份口令
      * @param onlyLoggedIn true=仅导出凭证可用的已登录平台；false=导出数据库里全部绑定记录
      * @return 明文 JSON 或 Base64 密文
      */
     suspend fun export(password: String? = null, onlyLoggedIn: Boolean = true): String =
         withContext(Dispatchers.IO) {
+            require(!password.isNullOrBlank() && password.length >= 8) { "备份口令至少 8 位" }
             val json = exportJson(onlyLoggedIn)
-            if (password.isNullOrBlank()) json else AuthCrypto.encrypt(json, password)
+            AuthCrypto.encrypt(json, password)
         }
 
     /** 导出所有已登录平台为 JSON 字符串；无已登录平台时返回空 accounts */

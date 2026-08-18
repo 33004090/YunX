@@ -80,7 +80,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** 可选的下载线程数（最高 512） */
-private val threadOptions = listOf(1, 2, 4, 8, 16, 32, 64, 128, 256, 512)
+private val threadOptions = listOf(1, 2, 4, 8, 16, 32)
 
 /**
  * 设置页：下载线程数设置 + 主题外观 + 检查更新 + 日志与网盘认证。
@@ -347,7 +347,7 @@ fun SettingsScreen(
         SettingsItem(
             icon = Icons.Outlined.Backup,
             title = "导出网盘认证",
-            description = "AES 加密导出网盘 Token（可选密码），保护账号安全",
+            description = "使用至少 8 位口令加密 Cookie/JWT 后导出",
             onClick = { showExportAuthDialog = true }
         )
 
@@ -536,7 +536,7 @@ fun SettingsScreen(
                         SnackbarController.show("导出失败")
                         return@launch
                     }
-                    val encrypted = password.isNotBlank()
+                    val encrypted = true
                     val saved = withContext(Dispatchers.IO) {
                         backupManager.saveToDownloads(context, content, encrypted)
                     }
@@ -780,7 +780,7 @@ fun SettingsScreen(
     }
 }
 
-/** 导出网盘认证弹窗：AES 加密密码（可留空）+ 导出范围（仅已登录 / 全部绑定） */
+/** 导出网盘认证弹窗：AES 加密密码 + 导出范围（仅已登录 / 全部绑定） */
 @Composable
 private fun ExportAuthDialog(
     onDismiss: () -> Unit,
@@ -794,7 +794,7 @@ private fun ExportAuthDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "设置密码对认证文件进行 AES 加密（建议设置；留空则导出明文）。密码请务必牢记，丢失无法找回。",
+                    text = "设置至少 8 位密码对认证文件进行 AES 加密。密码请务必牢记，丢失无法找回。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -802,7 +802,7 @@ private fun ExportAuthDialog(
                     value = password,
                     onValueChange = { password = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("加密密码（可留空）") },
+                    label = { Text("加密密码（至少 8 位）") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     singleLine = true
@@ -837,7 +837,10 @@ private fun ExportAuthDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(password, onlyLoggedIn) }) { Text("导出") }
+            Button(
+                onClick = { onConfirm(password, onlyLoggedIn) },
+                enabled = password.length >= 8
+            ) { Text("导出") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }

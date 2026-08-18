@@ -16,16 +16,12 @@ import org.json.JSONObject
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 import java.io.ByteArrayInputStream
 import java.util.zip.GZIPInputStream
 
@@ -39,7 +35,7 @@ import java.util.zip.GZIPInputStream
  * mcloud-sign 按「明文 body」计算（§4），加密只是传输包装；mcloud-skey 可省略。
  */
 class C139Api(
-    private val client: OkHttpClient = createUnsafeClient()
+    private val client: OkHttpClient = OkHttpClient()
 ) {
 
     private val jsonMediaType = "application/json;charset=UTF-8".toMediaType()
@@ -181,7 +177,9 @@ class C139Api(
     suspend fun getShareFiles(
         linkId: String,
         pcaId: String,
-        passwd: String
+        passwd: String,
+        begin: Int = 1,
+        end: Int = 200
     ): List<ShareFile> = withContext(Dispatchers.IO) {
         val req = JSONObject()
             .put("account", "")            // 列表端点 account 必须为空串，且本调用不带鉴权头（§3）
@@ -190,9 +188,9 @@ class C139Api(
             .put("caSrt", 1)               // 排序：目录按创建时间
             .put("coSrt", 1)               // 排序：文件按创建时间
             .put("srtDr", 0)               // 排序方向：降序
-            .put("bNum", 1)                // 分页起始
+            .put("bNum", begin)            // 分页起始
             .put("pCaID", pcaId)
-            .put("eNum", 200)              // 分页大小
+            .put("eNum", end)              // 分页结束
         val plain = JSONObject().put("getOutLinkInfoReq", req).toString()
         val respJson = sharePostAnonymous(C139Constants.SHARE_LIST_URL, plain)
         val resultCode = respJson.optString("resultCode")
@@ -717,20 +715,4 @@ class C139Api(
         return runCatching { JSONObject(decryptBody(body)) }.getOrElse { JSONObject(body) }
     }
 
-    companion object {
-        /** 信任所有证书的 Client（调试/抓包用，与 QuarkApi/BaiduApi/XunleiApi 一致；上线前应改回默认校验） */
-        fun createUnsafeClient(): OkHttpClient {
-            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            })
-            val sslContext = SSLContext.getInstance("TLS")
-            sslContext.init(null, trustAllCerts, SecureRandom())
-            return OkHttpClient.Builder()
-                .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
-                .hostnameVerifier { _, _ -> true }
-                .build()
-        }
-    }
 }

@@ -57,7 +57,7 @@ object UCCookieUtil {
  * 与夸克 API 结构一致，仅域名/UA/pr 参数不同。
  */
 class UCApi(
-    private val client: OkHttpClient = QuarkApi.createUnsafeClient()
+    private val client: OkHttpClient = OkHttpClient()
 ) {
 
     /**

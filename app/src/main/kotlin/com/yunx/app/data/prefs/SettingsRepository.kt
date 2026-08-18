@@ -10,11 +10,11 @@ class SettingsRepository(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences("yunx_settings", Context.MODE_PRIVATE)
 
-    /** 下载线程数（分片并发数），默认 16，上限 512 */
+    /** 下载线程数（分片并发数），默认 16，上限 32 */
     var downloadThreads: Int
-        get() = prefs.getInt("download_threads", DEFAULT_DOWNLOAD_THREADS)
+        get() = prefs.getInt("download_threads", DEFAULT_DOWNLOAD_THREADS).coerceIn(1, 32)
         set(value) {
-            prefs.edit().putInt("download_threads", value.coerceIn(1, 512)).apply()
+            prefs.edit().putInt("download_threads", value.coerceIn(1, 32)).apply()
         }
 
     /** 自定义下载保存目录（SAF tree Uri，content://...）；null/空 = 系统默认 Download 目录 */
