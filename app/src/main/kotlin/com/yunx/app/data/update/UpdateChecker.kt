@@ -1,12 +1,11 @@
 package com.yunx.app.data.update
 
 import android.content.Context
+import com.yunx.app.data.network.HttpClients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 /**
  * GitHub Release 更新检测。
@@ -53,10 +52,7 @@ object UpdateChecker {
      */
     suspend fun fetchLatestRelease(): Release? = withContext(Dispatchers.IO) {
         runCatching {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
-                .build()
+            val client = HttpClients.apiClient()
             val request = Request.Builder()
                 .url(RELEASES_LATEST_URL)
                 .header("Accept", "application/vnd.github+json")

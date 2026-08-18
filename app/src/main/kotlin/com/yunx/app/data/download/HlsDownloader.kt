@@ -1,14 +1,13 @@
 package com.yunx.app.data.download
 
 import android.util.Log
+import com.yunx.app.data.network.HttpClients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -21,11 +20,7 @@ object HlsDownloader {
 
     private const val TAG = "YunX-HLS"
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    private val client get() = HttpClients.apiClient()
 
     /**
      * 下载 m3u8 转码流并合并为单个文件（mp4/ts）。

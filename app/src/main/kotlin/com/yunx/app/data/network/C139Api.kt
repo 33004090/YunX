@@ -35,8 +35,10 @@ import java.util.zip.GZIPInputStream
  * mcloud-sign 按「明文 body」计算（§4），加密只是传输包装；mcloud-skey 可省略。
  */
 class C139Api(
-    private val client: OkHttpClient = OkHttpClient()
+    private val clientProvider: () -> OkHttpClient = { HttpClients.apiClient() }
 ) {
+    /** 每次请求动态获取全局客户端（忽略 SSL 开关切换即时生效） */
+    private val client get() = clientProvider()
 
     private val jsonMediaType = "application/json;charset=UTF-8".toMediaType()
 

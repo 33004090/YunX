@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -52,6 +55,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,6 +65,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -71,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import com.yunx.app.data.backup.AuthBackupManager
 import com.yunx.app.data.backup.AuthCrypto
 import com.yunx.app.data.download.DownloadSaver
+import com.yunx.app.data.network.HttpClients
 import com.yunx.app.data.prefs.SettingsRepository
 import com.yunx.app.data.update.UpdateChecker
 import com.yunx.app.ui.SnackbarController
@@ -85,7 +91,7 @@ private val threadOptions = listOf(1, 2, 4, 8, 16, 32)
 /**
  * 设置页：下载线程数设置 + 主题外观 + 检查更新 + 日志与网盘认证。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen(
     scrollBehavior: TopAppBarScrollBehavior,
@@ -114,6 +120,10 @@ fun SettingsScreen(
     // 下载保存目录（SAF）：本地状态驱动 UI 刷新，同时同步 SharedPreferences
     val settingsRepo = remember { SettingsRepository(context) }
     var downloadDirUri by remember { mutableStateOf(settingsRepo.downloadDirUri) }
+    // 隐藏开发调试：忽略 SSL 证书（抓包用，长按「关于云析」打开菜单）
+    var ignoreSsl by remember { mutableStateOf(settingsRepo.ignoreSslCert) }
+    var showDevMenu by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { ignoreSsl = settingsRepo.ignoreSslCert }
     // 网络与下载策略（本地状态驱动 UI，同时同步 SharedPreferences）
     var maxConcurrent by remember { mutableStateOf(settingsRepo.maxConcurrentDownloads) }
     var speedLimitBps by remember { mutableStateOf(settingsRepo.downloadSpeedLimit) }
@@ -366,7 +376,8 @@ fun SettingsScreen(
             icon = Icons.Outlined.Info,
             title = "关于云析",
             description = "版本信息、支持平台与技术说明",
-            onClick = onAboutClick
+            onClick = onAboutClick,
+            onLongClick = { showDevMenu = true } // 长按打开隐藏开发调试菜单
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -439,6 +450,62 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showLogDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // 隐藏开发调试菜单（长按「关于云析」打开）：忽略 SSL 证书（抓包调试用）
+    if (showDevMenu) {
+        AlertDialog(
+            onDismissRequest = { showDevMenu = false },
+            title = { Text("开发调试") },
+            text = {
+                Column {
+                    val toggleIgnoreSsl = {
+                        ignoreSsl = !ignoreSsl
+                        settingsRepo.ignoreSslCert = ignoreSsl
+                        HttpClients.ignoreSsl = ignoreSsl
+                        SnackbarController.show(
+                            if (ignoreSsl) "已忽略 SSL 证书校验（抓包模式）" else "已恢复 SSL 证书校验"
+                        )
+                    }
+                    val rowShape = MaterialTheme.shapes.medium
+                    val rowInteraction = remember { MutableInteractionSource() }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(rowShape)
+                            .combinedClickable(
+                                interactionSource = rowInteraction,
+                                indication = ripple(bounded = true),
+                                onClick = toggleIgnoreSsl
+                            ),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "忽略 SSL 证书",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = if (ignoreSsl) "已开启：所有网络请求不校验证书（抓包用）" else "已关闭：正常校验证书",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = ignoreSsl, onCheckedChange = { toggleIgnoreSsl() })
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "开启后所有 API 与下载请求将忽略 SSL 证书校验，便于配合抓包调试。请勿在日常使用中开启，存在中间人攻击风险。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDevMenu = false }) { Text("关闭") }
             }
         )
     }
@@ -898,19 +965,31 @@ private fun SectionLabel(text: String) {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SettingsItem(
     icon: ImageVector,
     title: String,
     description: String,
     onClick: () -> Unit,
+    /** 长按回调（隐藏菜单等）；null 时不启用长按 */
+    onLongClick: (() -> Unit)? = null,
     /** 自定义尾部内容（如「恢复默认」操作）；null 时显示默认 ChevronRight */
     trailing: @Composable (() -> Unit)? = null
 ) {
+    val shape = MaterialTheme.shapes.large
+    val interactionSource = remember { MutableInteractionSource() }
     Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true),
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
+        shape = shape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )

@@ -121,11 +121,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.ConnectionPool
-import okhttp3.Dispatcher
-import okhttp3.OkHttpClient
-import okhttp3.Protocol
-import java.util.concurrent.TimeUnit
+import com.yunx.app.data.network.HttpClients
 
 /**
  * 主页框架：
@@ -186,6 +182,8 @@ fun MainScreen() {
     val pan123Api = remember { Pan123Api() }
     val db = remember { AppDatabase.get(context) }
     val settings = remember { SettingsRepository(context) }
+    // 启动时同步「忽略 SSL 证书」开关（设置页隐藏菜单持久化，全局客户端即时生效）
+    LaunchedEffect(Unit) { HttpClients.ignoreSsl = settings.ignoreSslCert }
     val repository = remember {
         QuarkAccountRepository(db.quarkAccountDao(), api)
     }
@@ -216,35 +214,13 @@ fun MainScreen() {
         )
     }
     // 下载管理器：OkHttp 分片下载器 + Room 任务持久化 + 可配置线程数（设置页动态生效）
-    // 专用调优 OkHttpClient：默认实例 maxRequestsPerHost=5 会锁死分片并发（所有分片打同一 CDN host），
-    // 这里提升到与设置页线程数上限（32）对齐，并放宽超时避免弱网误判失败
-    val downloadClient = remember {
-        val dispatcher = Dispatcher().apply {
-            maxRequests = 512
-            maxRequestsPerHost = 512   // 与设置页线程数上限（512）对齐，不锁死并发
-        }
-        OkHttpClient.Builder()
-            .dispatcher(dispatcher)
-            .connectionPool(
-                ConnectionPool(
-                    maxIdleConnections = 64,          // 空闲连接保持上限（活跃并发由 Dispatcher 控制）
-                    keepAliveDuration = 5,
-                    timeUnit = TimeUnit.MINUTES
-                )
-            )
-            // HTTP/2 多路复用：多个 Range 流共享一条 TCP 连接，减少 TLS 握手/慢启动开销（CDN 不支持 h2 时自动降级 HTTP/1.1）
-            .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)        // 从默认 10s 放宽，链路抖动不误判失败
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .build()
-    }
+    // 下载客户端由全局 HttpClients 统一管理（大 Dispatcher 保障分片并发，不锁死 CDN host；
+    // 并支持隐藏菜单「忽略 SSL 证书」开关，抓包调试时即时生效，无需重启）
     val downloadManager = remember {
         DownloadManager(
             context = context,
             dao = db.downloadTaskDao(),
-            downloader = ChunkDownloader(downloadClient),
+            downloader = ChunkDownloader({ HttpClients.downloadClient() }),
             threadProvider = settings::downloadThreads,
             // 自定义下载保存目录（SAF tree Uri），设置页可选，动态生效
             saveDirProvider = { settings.downloadDirUri },

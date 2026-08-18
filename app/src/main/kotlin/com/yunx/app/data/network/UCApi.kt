@@ -57,8 +57,10 @@ object UCCookieUtil {
  * 与夸克 API 结构一致，仅域名/UA/pr 参数不同。
  */
 class UCApi(
-    private val client: OkHttpClient = OkHttpClient()
+    private val clientProvider: () -> OkHttpClient = { HttpClients.apiClient() }
 ) {
+    /** 每次请求动态获取全局客户端（忽略 SSL 开关切换即时生效） */
+    private val client get() = clientProvider()
 
     /**
      * Cookie 回写接收器（推荐由 UCAccountRepository 注入并落库）：

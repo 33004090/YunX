@@ -32,8 +32,10 @@ import java.util.zip.CRC32
  * 换 `DownloadURL`（download-v2 包装），对 params 做 Base64 解码得真实 CDN 直链，下载带 Referer。
  */
 class Pan123Api(
-    private val client: OkHttpClient = OkHttpClient()
+    private val clientProvider: () -> OkHttpClient = { HttpClients.apiClient() }
 ) {
+    /** 每次请求动态获取全局客户端（忽略 SSL 开关切换即时生效） */
+    private val client get() = clientProvider()
 
     private val jsonMediaType = "application/json;charset=UTF-8".toMediaType()
 

@@ -46,8 +46,10 @@ data class XunleiLoginStep(
  * - Pan：文件列表 / 分享解析 / 转存 / 直链（Bearer 认证，无需 x-signature，抓包确认）
  */
 class XunleiApi(
-    private val client: OkHttpClient = OkHttpClient()
+    private val clientProvider: () -> OkHttpClient = { HttpClients.apiClient() }
 ) {
+    /** 每次请求动态获取全局客户端（忽略 SSL 开关切换即时生效） */
+    private val client get() = clientProvider()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val formMediaType = "application/x-www-form-urlencoded".toMediaType()
