@@ -40,7 +40,9 @@ fun UpdateDialog(
     onDownload: () -> Unit,
     onLater: () -> Unit,
     onIgnore: () -> Unit,
-    downloading: Boolean = false
+    downloading: Boolean = false,
+    /** 使用镜像站下载（可选）；为 null 时不显示镜像站按钮 */
+    onDownloadMirror: (() -> Unit)? = null
 ) {
     AlertDialog(
         onDismissRequest = onLater,
@@ -114,25 +116,32 @@ fun UpdateDialog(
             }
         },
         confirmButton = {
-            Button(
-                onClick = onDownload,
-                enabled = !downloading
-            ) {
-                if (downloading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("下载中…")
-                } else {
-                    Icon(
-                        imageVector = Icons.Outlined.Download,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("下载更新")
+            Column(horizontalAlignment = Alignment.End) {
+                Button(
+                    onClick = onDownload,
+                    enabled = !downloading
+                ) {
+                    if (downloading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("下载中…")
+                    } else {
+                        Icon(
+                            imageVector = Icons.Outlined.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("下载更新")
+                    }
+                }
+                if (onDownloadMirror != null) {
+                    TextButton(onClick = onDownloadMirror) {
+                        Text("使用镜像站下载", color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
         },

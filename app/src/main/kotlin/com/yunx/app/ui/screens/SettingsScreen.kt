@@ -101,6 +101,8 @@ fun SettingsScreen(
     onAboutClick: () -> Unit,
     onSupportClick: () -> Unit,
     backupManager: AuthBackupManager,
+    /** 用应用内置下载器下载更新 APK（URL + 文件名），由 MainScreen 注入 DownloadManager */
+    onDownloadUpdateApk: (url: String, fileName: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showThreadsDialog by remember { mutableStateOf(false) }
@@ -502,6 +504,23 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            showDevMenu = false
+                            // 调试用途：直接弹出更新弹窗（不判断是否已是最新版），预览弹窗 UI
+                            scope.launch {
+                                val release = runCatching { UpdateChecker.fetchLatestRelease() }.getOrNull()
+                                updateRelease = release ?: UpdateChecker.Release(
+                                    tagName = "v1.2.4（预览）",
+                                    body = "这是调试预览弹窗，用于查看更新弹窗 UI（含镜像站下载按钮）。",
+                                    assets = emptyList(),
+                                    publishedAt = ""
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("显示检查更新弹窗") }
                 }
             },
             confirmButton = {
@@ -519,10 +538,18 @@ fun SettingsScreen(
                 updateRelease = null
                 val apk = release.assets.firstOrNull { it.name.endsWith(".apk", true) }
                 if (apk != null) {
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(apk.downloadUrl)))
-                    }
-                    SnackbarController.show("正在下载 ${apk.name}")
+                    onDownloadUpdateApk(apk.downloadUrl, apk.name)
+                    SnackbarController.show("已加入下载 ${apk.name}")
+                } else {
+                    SnackbarController.show("未找到 APK 下载链接")
+                }
+            },
+            onDownloadMirror = {
+                updateRelease = null
+                val apk = release.assets.firstOrNull { it.name.endsWith(".apk", true) }
+                if (apk != null) {
+                    onDownloadUpdateApk(UpdateChecker.mirrorUrl(apk.downloadUrl), apk.name)
+                    SnackbarController.show("已通过镜像站加入下载 ${apk.name}")
                 } else {
                     SnackbarController.show("未找到 APK 下载链接")
                 }

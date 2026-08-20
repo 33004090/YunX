@@ -634,7 +634,13 @@ fun MainScreen() {
                         onThemeClick = { showTheme = true },
                         onAboutClick = { showAbout = true },
                         onSupportClick = { showSupport = true },
-                        backupManager = backupManager
+                        backupManager = backupManager,
+                        onDownloadUpdateApk = { url, name ->
+                            scope.launch {
+                                downloadManager.enqueue(url = url, fileName = name)
+                                currentTab = MainTab.Download
+                            }
+                        }
                     )
                 }
             }
@@ -791,6 +797,20 @@ fun MainScreen() {
                             currentTab = MainTab.Download
                         }
                         SnackbarController.show("已加入下载，完成后点击「打开」即可安装")
+                    } else {
+                        SnackbarController.show("未找到 APK 下载链接")
+                    }
+                },
+                onDownloadMirror = {
+                    showUpdateDialog = false
+                    // 镜像站下载：GitHub 直连慢/失败时走国内加速镜像
+                    val apk = release.assets.firstOrNull { it.name.endsWith(".apk", true) }
+                    if (apk != null) {
+                        scope.launch {
+                            downloadManager.enqueue(url = UpdateChecker.mirrorUrl(apk.downloadUrl), fileName = apk.name)
+                            currentTab = MainTab.Download
+                        }
+                        SnackbarController.show("已通过镜像站加入下载，完成后点击「打开」即可安装")
                     } else {
                         SnackbarController.show("未找到 APK 下载链接")
                     }
