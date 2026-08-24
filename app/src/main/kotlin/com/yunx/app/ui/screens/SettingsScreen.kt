@@ -86,7 +86,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** 可选的下载线程数（最高 512） */
-private val threadOptions = listOf(1, 2, 4, 8, 16, 32)
+private val threadOptions = listOf(1, 2, 4, 8, 16, 32, 64, 128, 256, 512)
 
 /**
  * 设置页：下载线程数设置 + 主题外观 + 检查更新 + 日志与网盘认证。
